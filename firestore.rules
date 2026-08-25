@@ -216,8 +216,52 @@ service cloud.firestore {
         return collection in ['resources', 'services', 'bookings', 'holds', 'auditLog', 'dataRequests']
           && request.auth != null && request.auth.token.tenantId == tenantId;
       }
-      allow read: if inTenantCollections();
-      allow write: if inTenantCollections() && !isTenantSuspended(tenantId);
+
+      // ══ ROLES DE NEGOCIO (Etapa A, goal 14 del pool ReservaGo) ══
+      // owner/reception ven todo su tenant, igual que cualquier claim con
+      // tenantId ya podía desde el goal 6 -- el goal 14 solo agrega una
+      // restricción ADICIONAL para 'staff': acotado a los bookings donde
+      // SU PROPIO resourceId aparece en resourceIds[] (goal 9/10/11).
+      // Ninguna otra colección (resources/services/holds/auditLog/
+      // dataRequests) se restringe por role -- el goal solo pide acotar
+      // bookings. .get('resourceIds', []) es seguro ante un doc que no
+      // trajera ese campo (mismo patrón que isValidEmail() más arriba en
+      // este archivo, con request.resource.data.get(...)).
+      //
+      // LIMITACIÓN CONOCIDA: esto solo puede aplicar a get/create/update/
+      // delete (un documento concreto) -- Firestore NO permite filtrar
+      // documentos individuales dentro de un `list` (query) vía reglas,
+      // solo permitir o denegar la query completa. `list` sigue acotado
+      // únicamente por tenantId; que un 'staff' solo vea SUS bookings en
+      // una lista depende de que el cliente arme la query con
+      // where('resourceIds','array-contains',resourceId) -- por
+      // convención, no por regla. Documentado a propósito, no es un
+      // descuido.
+      // request.auth.token.get(key, default) -- NUNCA request.auth.token.key
+      // a secas: la mayoría de los claims sintéticos en tests (y tokens
+      // reales de antes del goal 14) no traen `role` en absoluto, y acceder
+      // a una key ausente del mapa de un token revienta la evaluación
+      // (mismo motivo que bookingData.get('resourceIds', []) más abajo).
+      function staffOwnsBooking(bookingData) {
+        return request.auth.token.get('role', '') != 'staff'
+          || (bookingData != null
+              && bookingData.get('resourceIds', []).hasAny([request.auth.token.get('resourceId', '')]));
+      }
+      function bookingAccessOk(bookingData) {
+        return collection != 'bookings' || staffOwnsBooking(bookingData);
+      }
+
+      // resource == null (documento inexistente, ej. un ID que nunca
+      // existió) se deja pasar la comprobación de rol -- Firestore ya
+      // resuelve "no existe" del lado del cliente (exists:false); acá solo
+      // interesa no reventar la evaluación de la regla accediendo a
+      // resource.data sobre un resource nulo, mismo criterio que
+      // isTenantSuspended() usa exists() antes de get().data.
+      allow get: if inTenantCollections() && (resource == null || bookingAccessOk(resource.data));
+      allow list: if inTenantCollections();
+      allow create: if inTenantCollections() && !isTenantSuspended(tenantId) && bookingAccessOk(request.resource.data);
+      allow update, delete: if inTenantCollections() && !isTenantSuspended(tenantId)
+        && (resource == null || bookingAccessOk(resource.data));
     }
   }
 }

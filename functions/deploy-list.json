@@ -12,6 +12,7 @@
     "syncGoogleReviews",
     "resolveTenant",
     "setPlatformRole",
+    "setUserRole",
     "onTenantWritten"
   ]
 }

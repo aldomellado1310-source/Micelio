@@ -17,4 +17,5 @@ module.exports = Object.assign(
   require('./resource.js'),
   require('./service.js'),
   require('./booking.js'),
+  require('./role.js'),
 );

@@ -17,6 +17,7 @@ const { resolveBusinessTz, resolveBufferMin } = require('./shared/timezone.js');
 const { searchPlaceId, fetchPlaceDetails, isFresh } = require('./googleReviews.js');
 const { resolveTenantId, assertTenantIdMatches } = require('./tenant.js');
 const { setPlatformRole } = require('./platformRole.js');
+const { setUserRole } = require('./setUserRole.js');
 const { buildPlatformAuditEntry } = require('./platformAuditLog.js');
 
 const app = initializeApp();
@@ -517,6 +518,25 @@ exports.resolveTenant = onCall(
 exports.setPlatformRole = onCall(
   { region: 'southamerica-east1' },
   async (request) => setPlatformRole(request, getAuth(app))
+);
+
+// setUserRole (Etapa A, goal 14 del pool ReservaGo): única forma de otorgar
+// role+tenantId(+resourceId) de negocio vía código -- solo invocable por un
+// 'owner' de ese mismo tenant o por un superadmin (ver
+// functions/setUserRole.js#assertCanSetUserRole).
+//
+// SECUENCIA OBLIGATORIA del goal antes de poder retirar el UID hardcodeado
+// de firestore.rules/storage.rules/functions/index.js (isAdmin(),
+// ADMIN_UID_FALLBACK): (a) desplegar y probar esto en staging, (b) asignar
+// role:'owner'+tenantId de Scissor White al UID actual, (c) VERIFICAR
+// cerrando y abriendo sesión que el token nuevo funciona, (d) recién
+// entonces retirar el UID. Ninguno de esos cuatro pasos se hizo en este
+// commit -- este entorno no puede desplegar a staging ni completar una
+// sesión de login real (ver CLAUDE.md, goal 14). El UID hardcodeado SIGUE
+// en los cuatro archivos hasta que Aldo complete (a)-(c) manualmente.
+exports.setUserRole = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => setUserRole(request, getAuth(app))
 );
 
 // onTenantWritten (Etapa T, goal 8 del pool ReservaGo): mantiene
