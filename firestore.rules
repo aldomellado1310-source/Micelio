@@ -90,5 +90,26 @@ service cloud.firestore {
 
     // Log de actividad: solo admin
     match /adminLog/{id} { allow read, write: if isAdmin(); }
+
+    // ══ TENENCIA (Etapa T, goal 5 del pool ReservaGo) ══
+    // tenants/{tenantId}: modelo de cliente de la plataforma -- SÍ tiene PII
+    // (contactEmail, contactName). Sin platformRole:'superadmin' todavía (ese
+    // rol llega en el goal 7) no existe ningún claim que deba poder leer ni
+    // escribir esto desde el cliente -- solo Admin SDK (functions/tenant.js,
+    // futuros scripts/callables de plataforma). isAdmin() de más arriba es el
+    // rol de NEGOCIO de Scissor White (pasará a ser 'owner' de SU tenant en
+    // el goal 14) y a propósito NO es el gate acá -- confundiría "dueño de un
+    // negocio" con "opera la plataforma completa".
+    match /tenants/{tenantId} { allow read, write: if false; }
+
+    // tenantsByDomain/{dominio} -> {tenantId, slug}: documento público SIN
+    // PII para que el cliente resuelva su propio tenant al cargar. La
+    // autoridad real del lado servidor es functions/tenant.js#resolveTenantId
+    // (lee esta misma colección con Admin SDK, no sujeto a estas reglas) --
+    // este doc es solo para que el FRONTEND sepa dónde está parado, ningún
+    // callable debe confiar en lo que el cliente diga sobre su propio tenant.
+    // Escritura solo Admin SDK -- no existe todavía un alta de tenants desde
+    // el cliente (eso es el panel de plataforma, goal 8).
+    match /tenantsByDomain/{dominio} { allow read: if true; allow write: if false; }
   }
 }

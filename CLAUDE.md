@@ -32,9 +32,10 @@ Estado conocido, a verificar antes de tocar nada:
   parseDt()/parseYmd() siguen locales a propósito -- no son duplicados de
   shared/, resuelven un problema distinto (presentación o forma de retorno).
   Cambiar una regla en shared/ requiere correr `npm run build:core` para que
-  se refleje en el bundle -- no hay CI que lo automatice todavía (ver el
-  bullet de despliegue manual más abajo; ese mismo riesgo de "paso manual
-  olvidado" aplica ahora también al bundle).
+  se refleje en el bundle -- el CI (goal 4, ver más abajo) NO verifica que el
+  bundle esté al día, solo que functions/index.js y functions/deploy-list.json
+  coincidan; ese riesgo de "paso manual olvidado" para el bundle sigue sin
+  cubrir.
   Validación: functions/shared/validate.js es la única implementación real
   (isValidBookingPayload). firestore.rules mantiene isValidBooking() como copia
   CEL muerta (documentación) y isValidEmail() como el único gate real del camino
@@ -48,8 +49,43 @@ Estado conocido, a verificar antes de tocar nada:
 - log() escribe en memoria; saveAdmin() solo persiste services, staff y businessInfo.
   adminLog nunca se escribe desde el panel.
 - computeAvailability no filtra por status.
-- Despliegue manual con ocho nombres de función a mano; createBooking ya quedó
-  fuera de esa lista una vez y se congeló en silencio.
+- Tenencia (Etapa T, goal 5 del pool ReservaGo -- arranca, no está completa):
+  existen `tenants/{tenantId}` (PII: name, slug, domain, status, plan,
+  contactEmail, contactName, timezone, createdAt, createdBy) y
+  `tenantsByDomain/{dominio}` -> {tenantId, slug} (público, sin PII).
+  `functions/tenant.js#resolveTenantId(request, db)` es el helper que TODO
+  callable de negocio debe usar para obtener el tenantId real -- nunca leerlo
+  de `request.data`. Decisión clave: los callables se invocaban directo
+  contra `*.cloudfunctions.net` (sin pasar por Hosting), así que
+  `request.rawRequest.hostname` SIEMPRE era el dominio de Cloud Functions,
+  nunca `scissorwhite.cl` -- se resolvió agregando un rewrite de Firebase
+  Hosting (`firebase.json#hosting.rewrites`, `/api/<función>` ->
+  `functionId`+`region`) para las funciones que necesiten ver el dominio
+  real; Hosting hace de proxy y preserva el Host original. Probado de punta a
+  punta con el emulador real (Hosting+Functions+Firestore, no solo un
+  test unitario): `exports.resolveTenant` en `functions/index.js` es el único
+  callable expuesto así por ahora -- prueba de concepto, TODAVÍA no conectado
+  a resources/services/bookings (eso son los goals siguientes). Los
+  callables existentes (createBooking, getAvailability, etc.) siguen
+  invocándose igual que siempre, sin rewrite, sin tocar. `tenants/{tenantId}`
+  no es legible ni escribible desde ningún claim hoy (ni siquiera isAdmin())
+  -- solo Admin SDK, hasta que exista `platformRole:'superadmin'` (goal 7).
+  No hay datos reales todavía (no se migró nada de Scissor White, eso es el
+  goal de cierre 17).
+- Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
+  desplegar (ya no ocho nombres a mano en README.md).
+  `functions/scripts/printDeployTargets.js` arma el `--only` de
+  `firebase deploy` a partir de ese JSON. CI (.github/workflows/ci.yml,
+  goal 4) corre en cada push/PR: `functions/scripts/checkDeployList.js`
+  (falla si `functions/index.js` exporta algo que no está en
+  deploy-list.json -- el incidente real de createBooking, 2026-08-23), los
+  tests de `functions/` (`node --test`, incluye el cross-check de goal 3), y
+  los tests de reglas contra el emulador de Firestore+Storage
+  (`npm run test:rules`). De paso se corrigió un bug real preexistente en ese
+  script: solo levantaba el emulador de Firestore (`--only firestore`) y
+  tests/rules/storage.rules.test.js fallaba siempre por falta del emulador de
+  Storage -- ahora `--only firestore,storage`. El deploy sigue siendo manual
+  (Aldo lo corre); el CI no despliega nada, solo verifica.
 
 INVARIANTES — ningún goal puede romperlos:
 - La zona horaria del negocio gobierna, nunca la del navegador (IANA, zonedInstant()).

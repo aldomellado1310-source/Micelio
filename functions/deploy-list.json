@@ -1,0 +1,14 @@
+{
+  "$comment": "Lista versionada de toda función exportada desde functions/index.js que debe desplegarse. Fuente única para `firebase deploy --only functions:...` (ver functions/scripts/printDeployTargets.js y README.md#deploy) y para el chequeo de CI (functions/scripts/checkDeployList.js) que falla si alguna exports.X de index.js no aparece acá -- exactamente el olvido que dejó createBooking congelado en 2026-08-23 (ver CLAUDE.md, 'Estado conocido'). Al agregar una función nueva a functions/index.js, agregala también acá en el mismo commit.",
+  "functions": [
+    "onBookingCreated",
+    "createBooking",
+    "getClubStatus",
+    "getAvailability",
+    "onBookingWritten",
+    "onScheduleBlockWritten",
+    "refreshGoogleReviews",
+    "syncGoogleReviews",
+    "resolveTenant"
+  ]
+}
