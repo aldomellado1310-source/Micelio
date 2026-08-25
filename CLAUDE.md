@@ -11,8 +11,36 @@ functions/               callables y triggers
 firestore.rules, storage.rules
 
 Estado conocido, a verificar antes de tocar nada:
-- La lógica de solape está duplicada en TRES copias: functions/availability.js,
-  widget público y panel admin. Zona horaria, también tres. Validación, dos.
+- Solape y zona horaria: la fuente única es functions/shared/availability.js y
+  functions/shared/timezone.js. Ambos HTML lo consumen vía un bundle esbuild
+  (functions/shared/index.js -> public/js/core.bundle.js, IIFE global
+  `SWCore`, comando `npm run build:core`) en vez de copias inline: sus
+  funciones antes duplicadas (toMin/DEFAULT_TZ/dateKeyInZone/timeKeyInZone en
+  el widget; DEFAULT_TZ/checkConflict()/checkScheduleBlock() en el admin) son
+  ahora alias o llamadas directas a SWCore. checkConflict()/checkScheduleBlock()
+  del admin YA NO arman objetos Date en hora del navegador -- usan minutos-
+  desde-medianoche vía SWCore.toMinutes/SWCore.overlaps, igual que el
+  servidor. Cubierto por functions/test/crosscheck.solape.test.js (goal 3):
+  corre el TEXTO ACTUAL de isBarberFreeAt()/checkConflict() de ambos HTML
+  contra functions/shared/availability.js#isRangeFree para el mismo set de
+  casos -- revienta si cualquiera de los tres diverge (probado a propósito
+  con un bug deliberado, revertido antes de commitear). SIGUE PENDIENTE una
+  verificación real en navegador/emulador (no había firebase-tools instalado
+  en el entorno donde se hizo este cambio) antes de confiar en esto en
+  staging -- el cross-check en Node no reemplaza esa prueba, solo da
+  regresión automática. hoursRangeFor()/dowOfDateKey()/dateKeyToDate()/
+  parseDt()/parseYmd() siguen locales a propósito -- no son duplicados de
+  shared/, resuelven un problema distinto (presentación o forma de retorno).
+  Cambiar una regla en shared/ requiere correr `npm run build:core` para que
+  se refleje en el bundle -- no hay CI que lo automatice todavía (ver el
+  bullet de despliegue manual más abajo; ese mismo riesgo de "paso manual
+  olvidado" aplica ahora también al bundle).
+  Validación: functions/shared/validate.js es la única implementación real
+  (isValidBookingPayload). firestore.rules mantiene isValidBooking() como copia
+  CEL muerta (documentación) y isValidEmail() como el único gate real del camino
+  de escritura directa del admin — esa brecha sigue sin cerrar.
+  Estado: functions/shared/status.js centraliza DEFAULT_BOOKING_STATUS
+  ('pending'), pero sigue sin existir ninguna transición de estado en el repo.
 - isAdmin() es custom claim admin:true O UN UID ESCRITO A MANO, repetido en cuatro
   archivos: firestore.rules, storage.rules (x2), functions/index.js.
 - buildBookingDoc() escribe status:'pending' fijo y nada lo cambia jamás.

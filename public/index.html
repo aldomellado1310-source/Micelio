@@ -2956,6 +2956,7 @@ body.sw-intro-lock{overflow:hidden;height:100vh;height:100dvh}
 }
 </style>
 
+<script src="/js/core.bundle.js"></script>
 <script>
 (function(){
 // ═══════════════════════════════════════
@@ -3048,13 +3049,12 @@ async function refreshCatalog(){
 const HOURS = {1:[10,20],2:[10,20],3:[10,20],4:[10,20],5:[10,20],6:[10,17],0:null};
 const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-// 'HH:MM' -> minutos desde medianoche. Mismo criterio que
-// functions/availability.js#toMinutes (no se puede importar acá: este
-// <script> es plano, sin bundler).
-function toMin(hhmm){
-  const parts=String(hhmm||'0:0').split(':');
-  return (parseInt(parts[0],10)||0)*60+(parseInt(parts[1],10)||0);
-}
+// 'HH:MM' -> minutos desde medianoche. Alias directo de SWCore.toMinutes
+// (functions/shared/availability.js#toMinutes, empaquetado por esbuild en
+// public/js/core.bundle.js -- ver goal 2 del pool ReservaGo). Ya no es una
+// copia a mano: cambiar el criterio en shared/ se refleja acá sin editar
+// este archivo.
+const toMin = SWCore.toMinutes;
 
 // Rango de minutos abiertos [inicio,fin) de un día (dow=Date.getDay(),
 // 0=Dom..6=Sáb), o null si está cerrado. Preferencia (según 4b del plan):
@@ -3074,27 +3074,23 @@ function hoursRangeFor(dow, barber){
 }
 
 // ══ ZONA HORARIA DEL NEGOCIO ══
-// Copia deliberada de dateKeyInZone()/DEFAULT_TZ en functions/timezone.js --
-// este <script> es plano, sin bundler, no puede importar ese módulo (mismo
-// motivo ya documentado para overlaps()/isRangeFree() en availability.js).
-// Misma copia también en public/admin/index.html. Cambiar la lógica en
-// cualquiera de los tres sin revisar los otros dos es el tipo de divergencia
-// silenciosa que ya nos mordió con isValidBooking()/isValidBookingPayload().
+// Alias directo de SWCore (functions/shared/timezone.js, empaquetado por
+// esbuild -- ver goal 2 del pool ReservaGo). Ya no es una copia a mano: antes
+// esto era una reimplementación paralela que había que sincronizar a mano
+// con functions/shared/timezone.js y con la copia de public/admin/index.html
+// -- exactamente el tipo de divergencia silenciosa que ya nos mordió con
+// isValidBooking()/isValidBookingPayload(). dateKeyToDate() sí sigue local:
+// no existe en shared/ porque es una conversión de presentación (para
+// renderCal()), no una regla de negocio.
 //
 // PRINCIPIO (Fase 2): la zona del NEGOCIO gobierna todo -- el reloj/zona del
 // navegador de quien reserva no debe influir en nada. Por eso "hoy" para el
 // calendario nunca sale de `new Date()` a secas: siempre pasa por acá, con
 // `tz` explícito (el del negocio, cargado vía loadCatalog), nunca asumido
 // del entorno del navegador.
-const DEFAULT_TZ = 'America/Santiago';
-const DEFAULT_BUFFER_MIN = 0;
-function dateKeyInZone(instant, tz){
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, year:'numeric', month:'2-digit', day:'2-digit',
-  }).formatToParts(instant);
-  const get = t => parts.find(p=>p.type===t).value;
-  return `${get('year')}-${get('month')}-${get('day')}`;
-}
+const DEFAULT_TZ = SWCore.DEFAULT_TZ;
+const DEFAULT_BUFFER_MIN = SWCore.DEFAULT_BUFFER_MIN;
+const dateKeyInZone = SWCore.dateKeyInZone;
 // 'YYYY-MM-DD' -> Date a medianoche LOCAL DEL NAVEGADOR de ese día calendario.
 // No es una fuga de la zona del cliente: QUÉ día es ya lo resolvió
 // dateKeyInZone() contra la zona del negocio -- esto solo envuelve ese día ya
@@ -3104,20 +3100,12 @@ function dateKeyToDate(dateKey){
   const [y,m,d] = dateKey.split('-').map(Number);
   return new Date(y, m-1, d);
 }
-// Instante real -> 'HH:MM' de pared en `tz`. Copia deliberada de
-// timeKeyInZone() en functions/timezone.js -- mismo motivo que las de
-// arriba. Existe por un hallazgo concreto: el widget decidía qué horarios de
-// "hoy" ya pasaron con la hora del NAVEGADOR de quien reserva, no la del
-// negocio -- alguien reservando desde otra zona veía disponibilidad
-// distinta de la real (ver su uso en renderSlots).
-function timeKeyInZone(instant, tz){
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, hour:'2-digit', minute:'2-digit', hour12:false,
-  }).formatToParts(instant);
-  const get = t => parts.find(p=>p.type===t).value;
-  const hour = get('hour')==='24' ? '00' : get('hour');
-  return `${hour}:${get('minute')}`;
-}
+// Instante real -> 'HH:MM' de pared en `tz`. Existe por un hallazgo
+// concreto: el widget decidía qué horarios de "hoy" ya pasaron con la hora
+// del NAVEGADOR de quien reserva, no la del negocio -- alguien reservando
+// desde otra zona veía disponibilidad distinta de la real (ver su uso en
+// renderSlots).
+const timeKeyInZone = SWCore.timeKeyInZone;
 // 'YYYY-MM-DD' -> día de la semana (0=Dom..6=Sáb), para indexar
 // staff.schedule[dow]. Zona-independiente a propósito: el día de la semana
 // de una fecha calendario es el mismo mirado desde cualquier zona -- no hay
@@ -3682,9 +3670,11 @@ document.getElementById('bk-cnext').addEventListener('click',()=>{
 // kind:'booking', igual que en checkConflict (admin) y overlaps() (server).
 function isBarberFreeAt(barberId, candStart, candEnd){
   const busy=(AVAIL.barberBusy||{})[barberId]||[];
+  // SWCore.overlaps: mismo predicado que overlaps()/isRangeFree() en
+  // functions/shared/availability.js (empaquetado vía esbuild -- goal 2).
   if(busy.some(r=>{
     const buf = r.kind==='booking' ? BUSINESS_BUFFER_MIN : 0;
-    return candStart<toMin(r.end)+buf && candEnd>toMin(r.start)-buf;
+    return SWCore.overlaps(candStart, candEnd, toMin(r.start), toMin(r.end), buf);
   })) return false;
   // Colación recurrente: se resuelve en cliente, no vía la vista materializada
   // `availability/{fecha}`. Es semanal (no por fecha) y viene en `staff`, que

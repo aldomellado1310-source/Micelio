@@ -2,10 +2,12 @@
   "name": "scissor-white",
   "private": true,
   "scripts": {
-    "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules\""
+    "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules\"",
+    "build:core": "esbuild functions/shared/index.js --bundle --format=iife --global-name=SWCore --banner:js=\"/* SWCore -- generado desde functions/shared/*.js por esbuild (npm run build:core). No editar a mano. */\" --outfile=public/js/core.bundle.js"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^3.0.4",
+    "esbuild": "^0.28.2",
     "firebase": "^10.13.0",
     "playwright": "^1.62.1",
     "vitest": "^2.1.0"

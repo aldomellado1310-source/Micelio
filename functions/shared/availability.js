@@ -1,4 +1,18 @@
-// functions/availability.js — lógica pura de disponibilidad de horarios.
+// functions/shared/availability.js — lógica pura de disponibilidad de
+// horarios. Módulo único: functions/createBooking.js, functions/index.js y
+// functions/email.js lo importan de acá. Agnóstico de tenant: no asume una
+// zona horaria ni un catálogo de staff/servicios fijo — recibe `staff`,
+// `bookings`, `dow` y `scheduleBlocks` como parámetros en cada llamada
+// (ver computeAvailability), así que puede recibir la configuración de
+// cualquier negocio sin cambios.
+// public/index.html mantiene una copia deliberada de isBarberFreeAt() (mismo
+// criterio, documentado ahí) por ser <script> plano sin bundler.
+// public/admin/index.html TODAVÍA diverge: checkConflict()/
+// checkScheduleBlock() siguen armando objetos Date en la hora del NAVEGADOR
+// del admin en vez de usar minutos-desde-medianoche como overlaps()/
+// isRangeFree() acá — pendiente, no se tocó en este paso (requiere
+// verificación manual contra el emulador antes de cerrarlo, ver
+// docs/superpowers/plans/2026-08-24-shared-modules-plan.md, Task 4).
 // Sin dependencias de Firebase Admin: fácil de testear, se usa desde index.js.
 // PRIVACIDAD: esta lógica solo debe manejar/devolver datos derivados
 // (barberId, start, end). Nunca debe tocar name/email/phone/otro PII de una
