@@ -1,6 +1,6 @@
-// functions/timezone.js — conversión entre hora de pared del negocio y el
-// instante UTC real que representa, vía IANA (Intl, ya incluido en Node --
-// sin dependencia nueva). Sin dependencia de firebase-admin: mismo patrón
+// functions/shared/timezone.js — conversión entre hora de pared del negocio
+// y el instante UTC real que representa, vía IANA (Intl, ya incluido en Node
+// -- sin dependencia nueva). Sin dependencia de firebase-admin: mismo patrón
 // que availability.js/patients.js, testeable con node --test.
 //
 // PRINCIPIO (Fase 2): la zona del NEGOCIO gobierna todo -- ni el navegador

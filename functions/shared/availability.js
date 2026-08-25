@@ -1,4 +1,12 @@
-// functions/availability.js — lógica pura de disponibilidad de horarios.
+// functions/shared/availability.js — lógica pura de disponibilidad de
+// horarios. Módulo único: functions/createBooking.js, functions/index.js y
+// functions/email.js lo importan de acá. public/index.html mantiene una
+// copia deliberada de isBarberFreeAt() (mismo criterio, documentado ahí) por
+// ser <script> plano sin bundler. public/admin/index.html YA NO tiene una
+// copia divergente: checkConflict()/checkScheduleBlock() usan el mismo
+// criterio de minutos-desde-medianoche que overlaps()/isRangeFree() acá
+// (antes usaban objetos Date en hora del navegador — ver el comentario en
+// public/admin/index.html junto a checkConflict()).
 // Sin dependencias de Firebase Admin: fácil de testear, se usa desde index.js.
 // PRIVACIDAD: esta lógica solo debe manejar/devolver datos derivados
 // (barberId, start, end). Nunca debe tocar name/email/phone/otro PII de una
