@@ -11,8 +11,20 @@ functions/               callables y triggers
 firestore.rules, storage.rules
 
 Estado conocido, a verificar antes de tocar nada:
-- La lógica de solape está duplicada en TRES copias: functions/availability.js,
-  widget público y panel admin. Zona horaria, también tres. Validación, dos.
+- Solape y zona horaria: la fuente única es functions/shared/availability.js y
+  functions/shared/timezone.js (movidos desde functions/availability.js y
+  functions/timezone.js). public/index.html mantiene una copia deliberada y
+  fiel (documentada como tal, <script> plano sin bundler). public/admin/index.html
+  SIGUE DIVERGIENDO: checkConflict()/checkScheduleBlock() arman objetos Date en
+  la hora del NAVEGADOR del admin en vez de minutos-desde-medianoche — pendiente,
+  ver docs/superpowers/plans/2026-08-24-shared-modules-plan.md (Task 4, requiere
+  verificación manual contra el emulador antes de cerrarlo).
+  Validación: functions/shared/validate.js es la única implementación real
+  (isValidBookingPayload). firestore.rules mantiene isValidBooking() como copia
+  CEL muerta (documentación) y isValidEmail() como el único gate real del camino
+  de escritura directa del admin — esa brecha sigue sin cerrar.
+  Estado: functions/shared/status.js centraliza DEFAULT_BOOKING_STATUS
+  ('pending'), pero sigue sin existir ninguna transición de estado en el repo.
 - isAdmin() es custom claim admin:true O UN UID ESCRITO A MANO, repetido en cuatro
   archivos: firestore.rules, storage.rules (x2), functions/index.js.
 - buildBookingDoc() escribe status:'pending' fijo y nada lo cambia jamás.
