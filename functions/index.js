@@ -13,6 +13,7 @@ const { computeAvailability, dateKeyOf, dayBoundsOf } = require('./shared/availa
 const { resolveCreateBooking } = require('./createBooking.js');
 const { resolveBusinessTz, resolveBufferMin } = require('./shared/timezone.js');
 const { searchPlaceId, fetchPlaceDetails, isFresh } = require('./googleReviews.js');
+const { resolveTenantId, assertTenantIdMatches } = require('./tenant.js');
 
 const app = initializeApp();
 const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
@@ -441,5 +442,26 @@ exports.syncGoogleReviews = onCall(
       // configurando esto, así que viaja al panel en vez de un genérico.
       throw new HttpsError('unavailable', err.message || 'No se pudo consultar Google.');
     }
+  }
+);
+
+// resolveTenant (Etapa T, goal 5 del pool ReservaGo): callable MÍNIMO que
+// prueba el mecanismo de resolución de tenant por dominio -- todavía NO
+// conectado a resources/services/bookings (eso son los goals siguientes de
+// la Etapa T y de la Etapa A). Sirve como referencia de cómo cualquier
+// callable de negocio futuro debe resolver su tenant: por dominio primero
+// (resolveTenantId), rechazando si el payload trae un tenantId que no
+// coincide (assertTenantIdMatches) -- NUNCA al revés.
+//
+// A diferencia del resto de los callables de este archivo, este SÍ necesita
+// exponerse vía el rewrite de Firebase Hosting (ver firebase.json) para que
+// request.rawRequest.hostname refleje el dominio real del negocio en vez del
+// dominio de Cloud Functions -- ver el comentario de cabecera en tenant.js.
+exports.resolveTenant = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    const resolved = await resolveTenantId(request, getFirestore(app));
+    assertTenantIdMatches(resolved.tenantId, request.data && request.data.tenantId);
+    return resolved;
   }
 );

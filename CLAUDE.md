@@ -49,6 +49,29 @@ Estado conocido, a verificar antes de tocar nada:
 - log() escribe en memoria; saveAdmin() solo persiste services, staff y businessInfo.
   adminLog nunca se escribe desde el panel.
 - computeAvailability no filtra por status.
+- Tenencia (Etapa T, goal 5 del pool ReservaGo -- arranca, no está completa):
+  existen `tenants/{tenantId}` (PII: name, slug, domain, status, plan,
+  contactEmail, contactName, timezone, createdAt, createdBy) y
+  `tenantsByDomain/{dominio}` -> {tenantId, slug} (público, sin PII).
+  `functions/tenant.js#resolveTenantId(request, db)` es el helper que TODO
+  callable de negocio debe usar para obtener el tenantId real -- nunca leerlo
+  de `request.data`. Decisión clave: los callables se invocaban directo
+  contra `*.cloudfunctions.net` (sin pasar por Hosting), así que
+  `request.rawRequest.hostname` SIEMPRE era el dominio de Cloud Functions,
+  nunca `scissorwhite.cl` -- se resolvió agregando un rewrite de Firebase
+  Hosting (`firebase.json#hosting.rewrites`, `/api/<función>` ->
+  `functionId`+`region`) para las funciones que necesiten ver el dominio
+  real; Hosting hace de proxy y preserva el Host original. Probado de punta a
+  punta con el emulador real (Hosting+Functions+Firestore, no solo un
+  test unitario): `exports.resolveTenant` en `functions/index.js` es el único
+  callable expuesto así por ahora -- prueba de concepto, TODAVÍA no conectado
+  a resources/services/bookings (eso son los goals siguientes). Los
+  callables existentes (createBooking, getAvailability, etc.) siguen
+  invocándose igual que siempre, sin rewrite, sin tocar. `tenants/{tenantId}`
+  no es legible ni escribible desde ningún claim hoy (ni siquiera isAdmin())
+  -- solo Admin SDK, hasta que exista `platformRole:'superadmin'` (goal 7).
+  No hay datos reales todavía (no se migró nada de Scissor White, eso es el
+  goal de cierre 17).
 - Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
   desplegar (ya no ocho nombres a mano en README.md).
   `functions/scripts/printDeployTargets.js` arma el `--only` de
