@@ -1,0 +1,45 @@
+# Dependencias
+node_modules/
+functions/node_modules/
+
+# Entorno / secretos (nunca versionar claves reales)
+.env
+.env.*
+!.env.example
+functions/.env
+functions/.env.*
+!functions/.env.example
+serviceAccountKey.json
+*-service-account.json
+
+# Firebase
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+*-debug.log
+
+# Respaldo local pesado (zip de 21MB + originales; viven en disco, fuera de git)
+_source/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Worktrees de desarrollo aislado
+.worktrees/
+
+# Mockups de brainstorming (companion visual)
+.superpowers/
+
+# Salida de graphify (herramienta de análisis, se regenera)
+graphify-out/
+
+# Informes de auditoría: llevan nombres reales de clientes leídos de producción.
+# Nunca versionar, y nunca mover a public/ -- esa carpeta se publica entera en
+# Firebase Hosting y quedarían accesibles desde internet.
+*auditoria*.html
+
+# Capturas de los scripts de verificación en navegador (tests/browser/)
+.tmp-screenshots/

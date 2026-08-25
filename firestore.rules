@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Solo el staff admin. Antes se usaba `request.auth != null`, pero el
+    // registro público de Auth está habilitado: CUALQUIERA podía crear una
+    // cuenta con la API key pública y leer/escribir estos datos. Ahora se exige
+    // ser el admin — vía custom claim `admin:true` (preferido, permite sumar
+    // staff sin tocar reglas) o el UID del admin actual como respaldo inmediato.
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.admin == true ||
+        request.auth.uid == 'VUm858rENuNVzB4MAMtzLnGb1A63'
+      );
+    }
+
+    // Catálogo público: lectura libre, escritura solo admin
+    match /services/{id}   { allow read: if true; allow write: if isAdmin(); }
+    match /staff/{id}      { allow read: if true; allow write: if isAdmin(); }
+    match /businessInfo/{id}{ allow read: if true; allow write: if isAdmin(); }
+
+    // Imágenes del sitio (herramienta de reemplazo manual desde el admin):
+    // lectura libre porque el landing público las carga para TODOS los
+    // visitantes, no solo el staff logueado. Mismo patrón que services/staff.
+    match /siteImages/{slot} { allow read: if true; allow write: if isAdmin(); }
+
+    // Vista materializada de disponibilidad (sin PII), mantenida por la Cloud
+    // Function onBookingWritten (Admin SDK, no sujeta a estas reglas).
+    // Lectura pública para el widget de reservas; nunca escritura de cliente.
+    match /availability/{date} { allow read: if true; allow write: if false; }
+
+    // Espejo del perfil de Google Business (puntaje, total de opiniones y las
+    // reseñas que devuelve Places), mantenido por refreshGoogleReviews /
+    // syncGoogleReviews con Admin SDK. Lectura pública porque la sección de
+    // reseñas del landing la pinta para TODOS los visitantes -- mismo patrón
+    // que availability/siteImages. La escritura admin existe solo para el
+    // campo `manualReviews` que cura el panel: la API key de Places jamás
+    // baja al navegador, así que nadie puede "sincronizar" desde el cliente.
+    match /googleReviews/{id} { allow read: if true; allow write: if isAdmin(); }
+
+    // Reservas: solo admin lee/crea/edita/borra. La creación pública ya NO
+    // pasa por acá -- el widget (public/index.html) llama al callable
+    // transaccional `createBooking` (functions/createBooking.js, Admin SDK,
+    // no sujeto a estas reglas), que además verifica disponibilidad real
+    // antes de escribir (algo que una regla no puede hacer: no puede
+    // consultar otras colecciones, solo get()/exists() sobre rutas
+    // concretas). Antes de esta fase, cualquiera podía crear una reserva
+    // directo sin que NADA verificara solape de horario.
+    match /bookings/{id} {
+      allow read, update, delete: if isAdmin();
+      allow create: if isAdmin() && isValidEmail(request.resource.data.get('email', ''));
+    }
+    // El email es opcional (un barbero puede agendar por teléfono sin
+    // correo): si viene vacío se acepta, pero si trae contenido debe tener
+    // formato válido -- mismo regex que usa el widget público
+    // (public/index.html) y que isValidBookingPayload() en
+    // functions/createBooking.js.
+    function isValidEmail(email) {
+      return email is string && (email == '' || email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'));
+    }
+    // Ya NO la invoca ningún `allow` de este archivo -- queda como
+    // documentación del criterio que reemplazó al create público, portado
+    // (a mano; CEL y JS no comparten código) a isValidBookingPayload() en
+    // functions/createBooking.js, donde ahora vive la validación real.
+    // tests/rules/createBooking.crosscheck.test.js probó la equivalencia
+    // ANTES de este cambio y quedó retirado en el mismo commit que cerró
+    // esta rama -- ver el comentario al inicio de ese archivo.
+    function isValidBooking() {
+      let d = request.resource.data;
+      return d.status == 'pending'
+        && d.name is string  && d.name.size() > 1
+        && d.email is string && d.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
+        && d.phone is string && d.phone.size() >= 7
+        && d.svcId is string && d.barberId is string
+        && d.date is string  && d.time is string
+        && d.code is string
+        && d.club is string  && (d.club == 'member' || d.club == 'guest');
+    }
+
+    // Clientes (v19): nombre, contacto, historial de visitas y fotos (PII).
+    // Nunca hay escritura pública directa — el único creador/actualizador es
+    // la Cloud Function onBookingCreated (Admin SDK, no sujeta a estas reglas).
+    match /patients/{id} { allow read, write: if isAdmin(); }
+
+    // Bloqueos de horario (colación puntual, trámites, etc.): solo admin.
+    // El público nunca lee esta colección directo -- se refleja
+    // indirectamente como rangos ocupados (sin `reason`) a través de
+    // getAvailability, mismo patrón de privacidad que bookings.
+    match /scheduleBlocks/{id} { allow read, write: if isAdmin(); }
+
+    // Log de actividad: solo admin
+    match /adminLog/{id} { allow read, write: if isAdmin(); }
+  }
+}
