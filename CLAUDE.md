@@ -114,6 +114,50 @@ Estado conocido, a verificar antes de tocar nada:
   Probado que un superadmin puro NO puede leer/escribir ni las colecciones de
   nivel raíz de Scissor White ni ninguna subcolección de tenant (goal 6) --
   tests/rules/platform-role.rules.test.js, 5 tests contra el emulador real.
+  Goal 8: existe `public/superadmin/index.html` -- panel de PLATAFORMA
+  separado de `public/admin/index.html` (panel de negocio), solo accesible
+  con `isSuperadmin()`. Opera contra `registrago001` vía
+  `public/js/firebase-init-platform.js` -- CONFIG PENDIENTE: son placeholders,
+  no hay ninguna app web real registrada en `registrago001` todavía, hay que
+  reemplazarlos (ver el comentario de cabecera de ese archivo) antes de que
+  el panel funcione de verdad. `public/js/platform-auth.js`/`platform-data.js`
+  son los equivalentes de auth.js/data.js para este panel -- mismo patrón,
+  nunca comparten Firebase app con el panel de negocio. Alta/suspensión/
+  reactivación son escrituras DIRECTAS a `tenants/{tenantId}` (mismo criterio
+  que el admin panel usa para services/staff, sin callable) protegidas por
+  `stamped()` en firestore.rules (exige `updatedBy == request.auth.uid` y
+  `updatedAt == request.time` en cada create/update) -- sin esto,
+  `platformAuditLog` no podría atribuir un cambio al superadmin real que lo
+  hizo, porque Firestore no le entrega esa identidad a un trigger de ninguna
+  otra forma. Mismo problema que el goal 15 va a resolver para auditLog de
+  negocio, adelantado acá porque platformAuditLog lo necesita ya. Un tenant
+  NUNCA se borra -- ni un superadmin puede (`allow delete: if false`, más
+  estricto que services/staff, donde eso es solo convención sin gate en la
+  regla). Suspender bloquea la ESCRITURA de las subcolecciones del tenant
+  (goal 6) de inmediato vía `isTenantSuspended()` (un `get()` a
+  `tenants/{tenantId}` desde la regla) pero NO la lectura -- "no borra ni
+  oculta sus datos" es literal. Decisión de producto pedida por el goal (widget
+  público de un tenant suspendido): apagarlo por completo perdería el invariante "nada se
+  oculta"; la forma más simple es que, cuando el widget público se vuelva
+  tenant-aware (goal 9+), `tenantsByDomain/{dominio}` (ya público, sin PII)
+  refleje también `status` -- mantenido por el mismo trigger onTenantWritten
+  el día que haya un dominio real que sincronizar (hoy ningún tenant tiene
+  domain asignado, así que no hay nada que sincronizar todavía) -- y el
+  widget, si ve `status:'suspended'`, muestra un aviso estático en vez del
+  flujo de reserva, sin dejar de mostrar el resto del sitio. No implementado
+  todavía -- es una decisión de diseño registrada, el widget público sigue
+  sin ser tenant-aware.
+  `functions/index.js#onTenantWritten` (trigger) + `functions/platformAuditLog.js`
+  (lógica pura) mantienen `platformAuditLog/{id}` -- solo lectura para
+  superadmin, escritura solo Admin SDK. Verificación completa: sin acceso a
+  gstatic.com en este entorno (403 del proxy de egress, confirmado, no es
+  un bug a rodear) no se pudo cargar el panel en un navegador real contra
+  Firebase de verdad -- se verificó la lógica de UI completa (login,
+  credenciales inválidas, alta/suspensión/reactivación/logout, y el camino
+  de acceso denegado) con jsdom mockeando PlatformAuth/PlatformData, y el
+  aislamiento de datos con el emulador real de reglas
+  (tests/rules/tenant-lifecycle.rules.test.js, 9 tests). Sigue pendiente una
+  prueba real en navegador contra Firebase, igual que goals 2/3.
 - Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
   desplegar (ya no ocho nombres a mano en README.md).
   `functions/scripts/printDeployTargets.js` arma el `--only` de

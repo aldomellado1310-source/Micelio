@@ -16,6 +16,7 @@ const { resolveBusinessTz, resolveBufferMin } = require('./shared/timezone.js');
 const { searchPlaceId, fetchPlaceDetails, isFresh } = require('./googleReviews.js');
 const { resolveTenantId, assertTenantIdMatches } = require('./tenant.js');
 const { setPlatformRole } = require('./platformRole.js');
+const { buildPlatformAuditEntry } = require('./platformAuditLog.js');
 
 const app = initializeApp();
 const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
@@ -477,4 +478,26 @@ exports.resolveTenant = onCall(
 exports.setPlatformRole = onCall(
   { region: 'southamerica-east1' },
   async (request) => setPlatformRole(request, getAuth(app))
+);
+
+// onTenantWritten (Etapa T, goal 8 del pool ReservaGo): mantiene
+// platformAuditLog/{id} -- altas, suspensiones y reactivaciones de tenants.
+// Firestore no le entrega al trigger la identidad de quien escribió; lee
+// `updatedBy` del documento, que firestore.rules#stamped() exige en cada
+// create/update de tenants/{tenantId} (ver ese comentario para el porqué).
+// Mismo patrón que se usará para auditLog de negocio en el goal 15,
+// adelantado acá porque platformAuditLog lo necesita ya.
+exports.onTenantWritten = onDocumentWritten(
+  { document: 'tenants/{tenantId}', region: 'southamerica-east1' },
+  async (event) => {
+    const before = event.data.before.exists ? event.data.before.data() : null;
+    const after = event.data.after.exists ? event.data.after.data() : null;
+    const entry = buildPlatformAuditEntry(before, after);
+    if (!entry) return;
+    await getFirestore(app).collection('platformAuditLog').add({
+      ...entry,
+      tenantId: event.params.tenantId,
+      ts: FieldValue.serverTimestamp(),
+    });
+  }
 );

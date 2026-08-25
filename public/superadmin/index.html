@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Micelio · Plataforma</title>
+<!--
+  public/superadmin/index.html — panel de administración de PLATAFORMA
+  (Etapa T, goal 8 del pool ReservaGo). Separado a propósito de
+  public/admin/index.html (panel de NEGOCIO de un tenant, hoy Scissor White):
+  este panel opera contra el proyecto Firebase `registrago001` (la
+  plataforma Micelio), nunca contra `scissor-white` -- ver
+  README.md#Contexto:-Micelio. Solo accesible con el custom claim
+  platformRole:'superadmin' (goal 7); el gate real vive en firestore.rules
+  (isSuperadmin()), no acá -- este archivo solo intenta cargar datos tras el
+  login y muestra "acceso denegado" si Firestore rechaza, mismo patrón que
+  public/admin/index.html usa para isAdmin().
+
+  Mismo criterio que el resto del repo: HTML simple, JS y CSS inline, sin
+  framework nuevo.
+-->
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --border: #2a2e38; --text: #e8eaed;
+    --muted: #9aa0ac; --accent: #6c8dff; --danger: #e05c5c; --ok: #4caf7d;
+    --warn: #d9a441;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px; border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px; }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 20px; }
+  section h2 { font-size: 14px; margin: 0 0 16px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge-active { background: rgba(76,175,125,.15); color: var(--ok); }
+  .badge-suspended { background: rgba(224,92,92,.15); color: var(--danger); }
+  .badge-trial { background: rgba(217,164,65,.15); color: var(--warn); }
+  button { cursor: pointer; border: 1px solid var(--border); background: #20242e; color: var(--text); border-radius: 6px; padding: 6px 12px; font-size: 13px; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { border-color: var(--danger); color: var(--danger); background: transparent; }
+  button.danger:hover { background: rgba(224,92,92,.1); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  input, select { background: #0f1115; border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 8px 10px; font-size: 14px; width: 100%; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .field { margin-bottom: 12px; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .banner { padding: 12px 16px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; display: none; }
+  .banner-danger { background: rgba(224,92,92,.12); border: 1px solid rgba(224,92,92,.4); color: var(--danger); }
+  .banner-ok { background: rgba(76,175,125,.12); border: 1px solid rgba(76,175,125,.4); color: var(--ok); }
+  .muted { color: var(--muted); font-size: 13px; }
+  .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .login-box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 32px; width: 320px; }
+  .login-box h1 { font-size: 18px; margin: 0 0 20px; }
+  .row-actions { display: flex; gap: 8px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 16px 0; text-align: center; }
+</style>
+</head>
+<body>
+
+<div id="sa-login" class="login-wrap">
+  <div class="login-box">
+    <h1>Micelio · Plataforma</h1>
+    <div class="field">
+      <label for="sa-email">Email</label>
+      <input id="sa-email" type="email" autocomplete="username">
+    </div>
+    <div class="field">
+      <label for="sa-pass">Contraseña</label>
+      <input id="sa-pass" type="password" autocomplete="current-password">
+    </div>
+    <div id="sa-login-err" class="banner banner-danger">Credenciales inválidas.</div>
+    <button class="primary" id="sa-login-btn" style="width:100%">Entrar</button>
+  </div>
+</div>
+
+<div id="sa-app" style="display:none">
+  <header>
+    <h1>Micelio <span>· panel de plataforma</span></h1>
+    <button id="sa-logout">Salir</button>
+  </header>
+  <main>
+    <div id="sa-denied-banner" class="banner banner-danger">
+      Tu cuenta no tiene el rol de superadmin de la plataforma -- no se pudo cargar nada.
+      Pedile a otro superadmin que te lo otorgue (functions/platformRole.js#setPlatformRole).
+    </div>
+    <div id="sa-ok-banner" class="banner banner-ok"></div>
+
+    <section>
+      <h2>Clientes (tenants)</h2>
+      <table>
+        <thead><tr><th>Nombre</th><th>Slug</th><th>Estado</th><th>Plan</th><th>Dominio</th><th></th></tr></thead>
+        <tbody id="sa-tenants-body"></tbody>
+      </table>
+      <div id="sa-tenants-empty" class="empty" style="display:none">Todavía no hay ningún tenant.</div>
+    </section>
+
+    <section>
+      <h2>Alta de cliente</h2>
+      <div class="form-grid">
+        <div class="field"><label for="sa-new-name">Nombre del negocio</label><input id="sa-new-name" placeholder="Scissor White"></div>
+        <div class="field"><label for="sa-new-slug">Slug</label><input id="sa-new-slug" placeholder="scissorwhite"></div>
+        <div class="field"><label for="sa-new-tz">Zona horaria (IANA)</label><input id="sa-new-tz" value="America/Santiago"></div>
+        <div class="field"><label for="sa-new-email">Email de contacto</label><input id="sa-new-email" type="email" placeholder="contacto@negocio.cl"></div>
+        <div class="field"><label for="sa-new-contact">Nombre de contacto (opcional)</label><input id="sa-new-contact" placeholder="Victoria"></div>
+      </div>
+      <p class="muted">El dominio propio queda vacío al crear -- se asigna después, cuando el cliente tenga uno (fuera de alcance de este panel, ver CLAUDE.md).</p>
+      <button class="primary" id="sa-create-btn">Crear tenant</button>
+    </section>
+
+    <section>
+      <h2>Auditoría de plataforma</h2>
+      <table>
+        <thead><tr><th>Fecha</th><th>Acción</th><th>Tenant</th><th>Superadmin</th></tr></thead>
+        <tbody id="sa-audit-body"></tbody>
+      </table>
+      <div id="sa-audit-empty" class="empty" style="display:none">Sin actividad todavía.</div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+function g(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+var STATUS_LABEL = { active: 'Activo', suspended: 'Suspendido', trial: 'Prueba' };
+
+function showBanner(el, msg){
+  if (msg) { el.textContent = msg; el.style.display = 'block'; }
+  else { el.style.display = 'none'; }
+}
+
+// ═══ TENANTS ═══
+function renderTenants(tenants){
+  var body = g('sa-tenants-body');
+  body.innerHTML = '';
+  g('sa-tenants-empty').style.display = tenants.length ? 'none' : 'block';
+  tenants.forEach(function(t){
+    var tr = document.createElement('tr');
+    var badgeClass = 'badge-' + (t.status || 'trial');
+    var toggleLabel = t.status === 'suspended' ? 'Reactivar' : 'Suspender';
+    var toggleClass = t.status === 'suspended' ? 'primary' : 'danger';
+    tr.innerHTML =
+      '<td>' + esc(t.name) + '</td>' +
+      '<td>' + esc(t.slug) + '</td>' +
+      '<td><span class="badge ' + badgeClass + '">' + esc(STATUS_LABEL[t.status] || t.status) + '</span></td>' +
+      '<td>' + esc(t.plan || '-') + '</td>' +
+      '<td>' + esc(t.domain || '(sin dominio propio)') + '</td>' +
+      '<td class="row-actions"><button class="' + toggleClass + '" data-toggle="' + esc(t.id) + '" data-next="' + (t.status === 'suspended' ? 'active' : 'suspended') + '">' + toggleLabel + '</button></td>';
+    body.appendChild(tr);
+  });
+  Array.prototype.forEach.call(body.querySelectorAll('[data-toggle]'), function(btn){
+    btn.addEventListener('click', function(){ toggleStatus(btn.dataset.toggle, btn.dataset.next, btn); });
+  });
+}
+
+async function toggleStatus(tenantId, nextStatus, btn){
+  btn.disabled = true;
+  try {
+    await window.PlatformData.setTenantStatus(tenantId, nextStatus);
+    showBanner(g('sa-ok-banner'), nextStatus === 'suspended' ? 'Tenant suspendido.' : 'Tenant reactivado.');
+    await refreshAll();
+  } catch (e) {
+    console.error('No se pudo cambiar el estado del tenant', e);
+    showBanner(g('sa-ok-banner'), null);
+    alert('No se pudo cambiar el estado: ' + (e.message || e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+g('sa-create-btn').addEventListener('click', async function(){
+  var name = g('sa-new-name').value.trim();
+  var slug = g('sa-new-slug').value.trim();
+  var timezone = g('sa-new-tz').value.trim() || 'America/Santiago';
+  var contactEmail = g('sa-new-email').value.trim();
+  var contactName = g('sa-new-contact').value.trim();
+  if (!name || !slug || !contactEmail) {
+    alert('Nombre, slug y email de contacto son obligatorios.');
+    return;
+  }
+  var btn = g('sa-create-btn');
+  btn.disabled = true;
+  try {
+    await window.PlatformData.createTenant({ name: name, slug: slug, timezone: timezone, contactEmail: contactEmail, contactName: contactName });
+    g('sa-new-name').value = ''; g('sa-new-slug').value = ''; g('sa-new-email').value = ''; g('sa-new-contact').value = '';
+    showBanner(g('sa-ok-banner'), 'Tenant "' + name + '" creado.');
+    await refreshAll();
+  } catch (e) {
+    console.error('No se pudo crear el tenant', e);
+    alert('No se pudo crear el tenant: ' + (e.message || e));
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ═══ AUDIT LOG ═══
+function fmtTs(ts){
+  if (!ts) return '-';
+  // Firestore Timestamp del SDK cliente: {seconds, nanoseconds} con
+  // .toDate(). Si el snapshot local todavía no resolvió el serverTimestamp
+  // (escritura optimista propia), ts puede venir null -- ver el filtro en
+  // renderAuditLog.
+  try { return ts.toDate().toLocaleString('es-CL'); } catch (e) { return '-'; }
+}
+var ACTION_LABEL = {
+  tenant_created: 'Alta', tenant_suspended: 'Suspensión',
+  tenant_reactivated: 'Reactivación', tenant_updated: 'Edición',
+};
+function renderAuditLog(entries){
+  var body = g('sa-audit-body');
+  body.innerHTML = '';
+  g('sa-audit-empty').style.display = entries.length ? 'none' : 'block';
+  entries.forEach(function(e){
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + esc(fmtTs(e.ts)) + '</td>' +
+      '<td>' + esc(ACTION_LABEL[e.action] || e.action) + '</td>' +
+      '<td>' + esc(e.tenantId) + '</td>' +
+      '<td>' + esc(e.actorUid || '-') + '</td>';
+    body.appendChild(tr);
+  });
+}
+
+async function refreshAll(){
+  var tenants = await window.PlatformData.loadTenants();
+  renderTenants(tenants);
+  var log = await window.PlatformData.loadPlatformAuditLog();
+  renderAuditLog(log);
+}
+
+// ═══ LOGIN / GATE ═══
+// Mismo patrón que public/admin/index.html: el gate real es
+// firestore.rules (isSuperadmin()), no una verificación de claim acá. Si el
+// login funciona pero la cuenta no es superadmin, refreshAll() falla con
+// permission-denied y se muestra sa-denied-banner en vez del panel vacío.
+async function login(){
+  try {
+    await window.PlatformAuth.signIn(g('sa-email').value.trim(), g('sa-pass').value);
+  } catch (e) {
+    showBanner(g('sa-login-err'), 'Credenciales inválidas.');
+    return;
+  }
+  g('sa-login').style.display = 'none';
+  g('sa-app').style.display = 'block';
+  showBanner(g('sa-denied-banner'), null);
+  try {
+    await refreshAll();
+  } catch (e) {
+    console.error('No se pudo cargar el panel de plataforma (¿falta platformRole:superadmin?)', e);
+    showBanner(g('sa-denied-banner'), 'Tu cuenta no tiene el rol de superadmin de la plataforma -- no se pudo cargar nada. Pedile a otro superadmin que te lo otorgue.');
+  }
+}
+g('sa-login-btn').addEventListener('click', login);
+g('sa-pass').addEventListener('keydown', function(e){ if (e.key === 'Enter') login(); });
+g('sa-logout').addEventListener('click', async function(){
+  await window.PlatformAuth.signOut();
+  g('sa-app').style.display = 'none';
+  g('sa-login').style.display = 'flex';
+  g('sa-pass').value = '';
+});
+
+})();
+</script>
+<script type="module" src="/js/firebase-init-platform.js"></script>
+<script type="module" src="/js/platform-auth.js"></script>
+<script type="module" src="/js/platform-data.js"></script>
+</body>
+</html>
