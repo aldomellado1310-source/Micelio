@@ -15,6 +15,26 @@ Concepción, Chile): landing, sistema de reservas online y panel de administraci
   widget público de reservas.
 - El panel vive en una página aparte, **`/admin/`**, desindexada por `robots.txt`.
 
+## Contexto: Micelio
+
+Este codebase es la semilla sobre la que Micorriza (empresa de desarrollo) está
+construyendo **Micelio**, un producto SaaS de agendamiento (nombre de marca;
+el repo previo se llamó RegistraGo). Scissor White es el negocio piloto: hoy
+el código sigue siendo *single-tenant* (ver invariantes y prohibiciones de
+etapa en `CLAUDE.md`), sin ninguna generalización multi-cliente todavía — eso
+es trabajo futuro sin planificar, que requiere su propio spec antes de tocar
+código.
+
+Estructura de proyectos GCP/Firebase (separada a propósito, 2026-08-25):
+
+| Proyecto | Uso | Cuenta de facturación |
+|---|---|---|
+| `scissor-white` | Instancia dedicada de Scissor White (este repo, en producción) | Micorriza - Proyectos Clientes |
+| `registrago001` | Base de la futura plataforma Micelio (project ID histórico, no se puede renombrar) | Micelio (cuenta propia, separada de clientes) |
+
+No mezclar ambos proyectos hasta que exista una decisión de producto explícita
+sobre migrar Scissor White como tenant de la plataforma.
+
 ## Arquitectura
 
 | Pieza | Detalle |
