@@ -51,14 +51,15 @@ Estado conocido, a verificar antes de tocar nada:
   CEL muerta (documentación) y isValidEmail() como el único gate real del camino
   de escritura directa del admin — esa brecha sigue sin cerrar.
   Estado: functions/shared/status.js centraliza DEFAULT_BOOKING_STATUS
-  ('pending'), pero sigue sin existir ninguna transición de estado en el repo.
+  ('pending') y, desde los goals 12/13 (Etapa A, ver más abajo), las
+  transiciones válidas y el callable setBookingStatus que las aplica sobre
+  Scissor White de verdad.
 - isAdmin() es custom claim admin:true O UN UID ESCRITO A MANO, repetido en cuatro
   archivos: firestore.rules, storage.rules (x2), functions/index.js.
-- buildBookingDoc() escribe status:'pending' fijo y nada lo cambia jamás.
-- deleteBooking() hace deleteDoc: cancelar destruye el registro.
+- buildBookingDoc() sigue escribiendo status:'pending' fijo al crear -- eso no
+  cambió (el goal 13 solo tocó cómo se sale de 'pending', no cómo se entra).
 - log() escribe en memoria; saveAdmin() solo persiste services, staff y businessInfo.
   adminLog nunca se escribe desde el panel.
-- computeAvailability no filtra por status.
 - Tenencia (Etapa T, goal 5 del pool ReservaGo -- arranca, no está completa):
   existen `tenants/{tenantId}` (PII: name, slug, domain, status, plan,
   contactEmail, contactName, timezone, createdAt, createdBy) y
@@ -228,6 +229,57 @@ Estado conocido, a verificar antes de tocar nada:
   panel todavía, ni cambios a `functions/createBooking.js` (Scissor White
   sigue con `status:'pending'` fijo y `deleteBooking` hasta el goal 13) --
   mismo alcance que goals 9/10.
+  Goals 12+13 (fusionados -- ver más abajo por qué): `functions/shared/status.js`
+  es ahora la ÚNICA autoridad sobre transiciones: `pending -> confirmed|
+  cancelled|no_show`, `confirmed -> completed|cancelled|no_show`,
+  `completed`/`cancelled`/`no_show` terminales. `validateStatusTransition()`
+  rechaza cada motivo con un código/mensaje ESPECÍFICO (estado actual
+  desconocido, estado destino desconocido, estado actual terminal,
+  transición no declarada) -- nunca un "transición inválida" genérico, tal
+  como lo pide el goal 12. `occupiesSlot()` (solo `cancelled`/`no_show`
+  liberan cupo; cualquier status ausente o desconocido cuenta como que
+  OCUPA, a propósito conservador) ahora vive DENTRO de
+  `computeAvailability()`/`computeResourceAvailability()`
+  (`functions/shared/availability.js`) -- una sola fuente, ningún call site
+  tuvo que cambiar (`getAvailability`, `recomputeAvailabilityForDate`,
+  `createBooking` heredan el filtro gratis).
+
+  DECISIÓN DE ALCANCE (consultada y confirmada por Aldo, dos preguntas
+  seguidas): el goal 12 pedía explícitamente que el módulo lo consumieran
+  "tanto functions/ como el panel de negocio", pero hoy NO existe ningún
+  flujo real de cambio de estado -- el panel solo borraba la cita
+  (deleteBooking), que es literalmente lo que el goal 13 (siguiente) viene a
+  resolver. Fusionar 12+13 en un solo paso era la única forma de consumir el
+  módulo de verdad en ambas superficies sin código especulativo. Y dentro de
+  13: su callable `setBookingStatus(tenantId resuelto en servidor, bookingId,
+  status, reason)` tal como está escrito en el pool asume que YA existe un
+  tenant real para el negocio que lo llama -- pero Scissor White sigue sin
+  tenant real (eso es el goal de cierre 17), así que resolver tenantId por
+  dominio haría fallar el callable siempre. Se decidió corregir el bug real
+  y ya documentado de Scissor White ahora: `functions/setBookingStatus.js`
+  (lógica pura, mismo patrón que `createBooking.js`) opera sobre la
+  colección RAÍZ `bookings`, SIN resolver tenantId. El motor puro
+  (`resolveSetBookingStatus`) no conoce la ruta del documento -- el goal 17
+  podrá apuntar este mismo callable a `tenants/{tenantId}/bookings` sin
+  reescribirlo, cuando ese tenant exista de verdad.
+
+  `functions/setBookingStatus.js#resolveSetBookingStatus()` tolera reservas
+  viejas sin `statusHistory`/`modifiedCount` (el 100% de las reservas de
+  Scissor White de antes del goal 11): `appendStatusHistory()` ya trataba
+  `undefined` como historial vacío. La primera vez que una reserva vieja
+  cambia de estado "adquiere" los campos de ciclo de vida del goal 11 sin
+  necesitar una migración aparte. `firestore.rules`: `bookings/{id}` pierde
+  `delete` (`allow delete: if false` SIEMPRE, mismo criterio que
+  `tenants/{tenantId}` del goal 8) -- ya no basta con que el panel deje de
+  llamar `deleteDoc`, la regla lo hace estructuralmente imposible.
+  `public/admin/index.html`: el botón "Eliminar cita" (modal y lista) pasó a
+  "Cancelar cita"/"Cancelar", llama a `setBookingStatus(id,'cancelled',
+  reason)` con un motivo capturado vía `window.prompt()` (sin agregar
+  ningún campo nuevo al modal, para no reestructurar el HTML) en vez de
+  borrar el documento. `checkConflict()` ahora filtra con
+  `SWCore.occupiesSlot(b.status)` -- sin esto, una cita cancelada seguiría
+  bloqueando su horario en el propio chequeo de conflictos del panel,
+  aunque el servidor ya la considerara libre.
 - Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
   desplegar (ya no ocho nombres a mano en README.md).
   `functions/scripts/printDeployTargets.js` arma el `--only` de

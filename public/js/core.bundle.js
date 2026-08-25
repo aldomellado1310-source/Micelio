@@ -10,10 +10,64 @@ var SWCore = (() => {
     }
   };
 
+  // functions/shared/status.js
+  var require_status = __commonJS({
+    "functions/shared/status.js"(exports, module) {
+      "use strict";
+      var BOOKING_STATUSES = ["pending", "confirmed", "completed", "cancelled", "no_show"];
+      var DEFAULT_BOOKING_STATUS = "pending";
+      var TRANSITIONS = {
+        pending: ["confirmed", "cancelled", "no_show"],
+        confirmed: ["completed", "cancelled", "no_show"]
+      };
+      var OCCUPYING_STATUSES = ["pending", "confirmed", "completed"];
+      var NON_OCCUPYING_STATUSES = ["cancelled", "no_show"];
+      function isValidBookingStatus(status) {
+        return BOOKING_STATUSES.indexOf(status) !== -1;
+      }
+      function isTerminalStatus(status) {
+        return isValidBookingStatus(status) && !Object.prototype.hasOwnProperty.call(TRANSITIONS, status);
+      }
+      function getValidNextStatuses(status) {
+        return TRANSITIONS[status] ? TRANSITIONS[status].slice() : [];
+      }
+      function occupiesSlot(status) {
+        return NON_OCCUPYING_STATUSES.indexOf(status) === -1;
+      }
+      function validateStatusTransition(fromStatus, toStatus) {
+        if (!isValidBookingStatus(fromStatus)) {
+          return { ok: false, code: "failed-precondition", message: `Estado actual desconocido: "${fromStatus}".` };
+        }
+        if (!isValidBookingStatus(toStatus)) {
+          return { ok: false, code: "invalid-argument", message: `Estado destino desconocido: "${toStatus}".` };
+        }
+        if (isTerminalStatus(fromStatus)) {
+          return { ok: false, code: "failed-precondition", message: `La reserva ya est\xE1 en un estado terminal (${fromStatus}) y no admite m\xE1s cambios.` };
+        }
+        if (getValidNextStatuses(fromStatus).indexOf(toStatus) === -1) {
+          return { ok: false, code: "failed-precondition", message: `Transici\xF3n no permitida: ${fromStatus} -> ${toStatus}.` };
+        }
+        return { ok: true };
+      }
+      module.exports = {
+        BOOKING_STATUSES,
+        DEFAULT_BOOKING_STATUS,
+        TRANSITIONS,
+        OCCUPYING_STATUSES,
+        isValidBookingStatus,
+        isTerminalStatus,
+        getValidNextStatuses,
+        occupiesSlot,
+        validateStatusTransition
+      };
+    }
+  });
+
   // functions/shared/availability.js
   var require_availability = __commonJS({
     "functions/shared/availability.js"(exports, module) {
       "use strict";
+      var { occupiesSlot } = require_status();
       function toMinutes(hhmm) {
         const parts = String(hhmm || "0:0").split(":");
         const h = parseInt(parts[0], 10) || 0;
@@ -39,7 +93,8 @@ var SWCore = (() => {
       }
       function computeAvailability({ bookings, staff, barberId, dow, scheduleBlocks }) {
         const wantsAny = !barberId || barberId === "any";
-        const relevant = wantsAny ? bookings || [] : (bookings || []).filter((b) => b.barberId === barberId);
+        const occupying = (bookings || []).filter((b) => occupiesSlot(b.status));
+        const relevant = wantsAny ? occupying : occupying.filter((b) => b.barberId === barberId);
         const barberBusy = {};
         function addBusy(id, start, end, kind) {
           if (!id) return;
@@ -88,7 +143,7 @@ var SWCore = (() => {
           if (!resourceBusy[id]) resourceBusy[id] = [];
           resourceBusy[id].push({ start, end, kind });
         }
-        (bookings || []).forEach((b) => {
+        (bookings || []).filter((b) => occupiesSlot(b.status)).forEach((b) => {
           const end = addMinutesToTime(b.time, b.dur || 0);
           (b.resourceIds || []).forEach((id) => addBusy(id, b.time, end, "booking"));
         });
@@ -205,19 +260,6 @@ var SWCore = (() => {
         return typeof p.name === "string" && p.name.length > 1 && typeof p.email === "string" && EMAIL_RE.test(p.email) && typeof p.phone === "string" && p.phone.length >= 7 && typeof p.svcId === "string" && typeof p.barberId === "string" && typeof p.date === "string" && typeof p.time === "string" && typeof p.code === "string" && typeof p.club === "string" && (p.club === "member" || p.club === "guest");
       }
       module.exports = { EMAIL_RE, isValidBookingPayload };
-    }
-  });
-
-  // functions/shared/status.js
-  var require_status = __commonJS({
-    "functions/shared/status.js"(exports, module) {
-      "use strict";
-      var BOOKING_STATUSES = ["pending"];
-      var DEFAULT_BOOKING_STATUS = "pending";
-      function isValidBookingStatus(status) {
-        return BOOKING_STATUSES.indexOf(status) !== -1;
-      }
-      module.exports = { BOOKING_STATUSES, DEFAULT_BOOKING_STATUS, isValidBookingStatus };
     }
   });
 

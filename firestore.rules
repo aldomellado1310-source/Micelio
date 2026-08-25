@@ -38,17 +38,26 @@ service cloud.firestore {
     // baja al navegador, así que nadie puede "sincronizar" desde el cliente.
     match /googleReviews/{id} { allow read: if true; allow write: if isAdmin(); }
 
-    // Reservas: solo admin lee/crea/edita/borra. La creación pública ya NO
-    // pasa por acá -- el widget (public/index.html) llama al callable
+    // Reservas: solo admin lee/crea/edita. La creación pública ya NO pasa
+    // por acá -- el widget (public/index.html) llama al callable
     // transaccional `createBooking` (functions/createBooking.js, Admin SDK,
     // no sujeto a estas reglas), que además verifica disponibilidad real
     // antes de escribir (algo que una regla no puede hacer: no puede
     // consultar otras colecciones, solo get()/exists() sobre rutas
     // concretas). Antes de esta fase, cualquiera podía crear una reserva
     // directo sin que NADA verificara solape de horario.
+    //
+    // delete: if false SIEMPRE (Etapa A, goal 13 del pool ReservaGo) --
+    // cancelar una reserva es un cambio de estado (status:'cancelled', vía
+    // el callable setBookingStatus), nunca un borrado. Antes de este goal,
+    // el panel borraba el documento entero al cancelar (deleteBooking) --
+    // ver CLAUDE.md, "Estado conocido". Mismo criterio ya aplicado a
+    // tenants/{tenantId} en el goal 8: la regla lo hace estructuralmente
+    // imposible, no solo por convención del panel.
     match /bookings/{id} {
-      allow read, update, delete: if isAdmin();
+      allow read, update: if isAdmin();
       allow create: if isAdmin() && isValidEmail(request.resource.data.get('email', ''));
+      allow delete: if false;
     }
     // El email es opcional (un barbero puede agendar por teléfono sin
     // correo): si viene vacío se acepta, pero si trae contenido debe tener

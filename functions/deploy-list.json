@@ -3,6 +3,7 @@
   "functions": [
     "onBookingCreated",
     "createBooking",
+    "setBookingStatus",
     "getClubStatus",
     "getAvailability",
     "onBookingWritten",

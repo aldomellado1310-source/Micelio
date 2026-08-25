@@ -5,14 +5,12 @@
 // `bookings`, `dow` y `scheduleBlocks` como parámetros en cada llamada
 // (ver computeAvailability), así que puede recibir la configuración de
 // cualquier negocio sin cambios.
-// public/index.html mantiene una copia deliberada de isBarberFreeAt() (mismo
-// criterio, documentado ahí) por ser <script> plano sin bundler.
-// public/admin/index.html TODAVÍA diverge: checkConflict()/
-// checkScheduleBlock() siguen armando objetos Date en la hora del NAVEGADOR
-// del admin en vez de usar minutos-desde-medianoche como overlaps()/
-// isRangeFree() acá — pendiente, no se tocó en este paso (requiere
-// verificación manual contra el emulador antes de cerrarlo, ver
-// docs/superpowers/plans/2026-08-24-shared-modules-plan.md, Task 4).
+// public/index.html y public/admin/index.html consumen esta lógica vía el
+// bundle SWCore (goal 2 del pool ReservaGo, functions/shared/index.js ->
+// public/js/core.bundle.js) en vez de copias inline -- checkConflict()/
+// checkScheduleBlock() (admin) e isBarberFreeAt() (widget) llaman
+// SWCore.overlaps()/SWCore.toMinutes() en minutos-desde-medianoche, nunca
+// objetos Date en hora del navegador.
 // Sin dependencias de Firebase Admin: fácil de testear, se usa desde index.js.
 // PRIVACIDAD: esta lógica solo debe manejar/devolver datos derivados
 // (barberId, start, end). Nunca debe tocar name/email/phone/otro PII de una
@@ -20,6 +18,8 @@
 // como Cloud Function en vez de dejar que el público lea `bookings` directo
 // (ver firestore.rules: bookings solo lo lee el admin).
 'use strict';
+
+const { occupiesSlot } = require('./status.js');
 
 // 'HH:MM' -> minutos desde medianoche. Tolerante a valores raros (mismo
 // espíritu defensivo que parseDt/checkConflict en public/index.html).
@@ -92,9 +92,13 @@ function dayBoundsOf(dateKey) {
 // esta función no lo valida ni lo rechaza.
 function computeAvailability({ bookings, staff, barberId, dow, scheduleBlocks }) {
   const wantsAny = !barberId || barberId === 'any';
+  // Solo las reservas que SIGUEN ocupando cupo cuentan como ocupación (goal
+  // 13 del pool ReservaGo) -- una reserva 'cancelled'/'no_show' libera su
+  // horario de inmediato. Ver occupiesSlot() en shared/status.js.
+  const occupying = (bookings || []).filter(b => occupiesSlot(b.status));
   const relevant = wantsAny
-    ? (bookings || [])
-    : (bookings || []).filter(b => b.barberId === barberId);
+    ? occupying
+    : occupying.filter(b => b.barberId === barberId);
 
   // `kind` distingue el origen de cada rango ocupado -- isRangeFree() lo usa
   // para aplicar el buffer de limpieza (bufferMin) SOLO entre reservas
@@ -205,7 +209,9 @@ function computeResourceAvailability({ bookings, resources, dow, scheduleBlocks 
     resourceBusy[id].push({ start, end, kind });
   }
 
-  (bookings || []).forEach((b) => {
+  // Mismo criterio que computeAvailability: una reserva 'cancelled'/
+  // 'no_show' ya no ocupa ninguno de sus resourceIds.
+  (bookings || []).filter((b) => occupiesSlot(b.status)).forEach((b) => {
     const end = addMinutesToTime(b.time, b.dur || 0);
     (b.resourceIds || []).forEach((id) => addBusy(id, b.time, end, 'booking'));
   });

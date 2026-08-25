@@ -12,6 +12,7 @@ const { sendBookingEmails } = require('./email.js');
 const { buildPatientUpsert, countClubVisits } = require('./patients.js');
 const { computeAvailability, dateKeyOf, dayBoundsOf } = require('./shared/availability.js');
 const { resolveCreateBooking } = require('./createBooking.js');
+const { resolveSetBookingStatus } = require('./setBookingStatus.js');
 const { resolveBusinessTz, resolveBufferMin } = require('./shared/timezone.js');
 const { searchPlaceId, fetchPlaceDetails, isFresh } = require('./googleReviews.js');
 const { resolveTenantId, assertTenantIdMatches } = require('./tenant.js');
@@ -189,6 +190,44 @@ exports.createBooking = onCall(
 
     if (!result.ok) throw new HttpsError(result.code, result.message);
     return { id: result.id };
+  }
+);
+
+// setBookingStatus (Etapa A, goal 13 del pool ReservaGo): reemplaza
+// deleteBooking -- cancelar (o cualquier otro cambio de estado) ya NO borra
+// el documento, lo transiciona. Mismo gate que el resto de escrituras de
+// bookings (isAdmin() vía assertAdmin, ver firestore.rules).
+//
+// Opera sobre la colección RAÍZ `bookings` (la de Scissor White) SIN
+// resolver tenantId -- Scissor White todavía no tiene un tenant real (eso
+// es el goal 17). resolveSetBookingStatus() no conoce la ruta del
+// documento, así que este mismo motor sirve igual el día que este callable
+// (u otro) opere sobre tenants/{tenantId}/bookings.
+exports.setBookingStatus = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    assertAdmin(request);
+    const payload = request.data || {};
+    const bookingId = typeof payload.bookingId === 'string' ? payload.bookingId : '';
+    if (!bookingId) throw new HttpsError('invalid-argument', 'bookingId es requerido.');
+
+    const db = getFirestore(app);
+    const ref = db.collection('bookings').doc(bookingId);
+    const result = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const resolved = resolveSetBookingStatus({
+        booking: snap.exists ? snap.data() : null,
+        toStatus: payload.status,
+        reason: typeof payload.reason === 'string' ? payload.reason : null,
+        actor: request.auth.uid,
+        now: new Date(),
+      });
+      if (resolved.ok) tx.update(ref, resolved.update);
+      return resolved;
+    });
+
+    if (!result.ok) throw new HttpsError(result.code, result.message);
+    return { ok: true };
   }
 );
 
