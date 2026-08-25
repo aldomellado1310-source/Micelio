@@ -12,13 +12,25 @@ firestore.rules, storage.rules
 
 Estado conocido, a verificar antes de tocar nada:
 - Solape y zona horaria: la fuente única es functions/shared/availability.js y
-  functions/shared/timezone.js (movidos desde functions/availability.js y
-  functions/timezone.js). public/index.html mantiene una copia deliberada y
-  fiel (documentada como tal, <script> plano sin bundler). public/admin/index.html
-  SIGUE DIVERGIENDO: checkConflict()/checkScheduleBlock() arman objetos Date en
-  la hora del NAVEGADOR del admin en vez de minutos-desde-medianoche — pendiente,
-  ver docs/superpowers/plans/2026-08-24-shared-modules-plan.md (Task 4, requiere
-  verificación manual contra el emulador antes de cerrarlo).
+  functions/shared/timezone.js. Ambos HTML lo consumen vía un bundle esbuild
+  (functions/shared/index.js -> public/js/core.bundle.js, IIFE global
+  `SWCore`, comando `npm run build:core`) en vez de copias inline: sus
+  funciones antes duplicadas (toMin/DEFAULT_TZ/dateKeyInZone/timeKeyInZone en
+  el widget; DEFAULT_TZ/checkConflict()/checkScheduleBlock() en el admin) son
+  ahora alias o llamadas directas a SWCore. checkConflict()/checkScheduleBlock()
+  del admin YA NO arman objetos Date en hora del navegador -- usan minutos-
+  desde-medianoche vía SWCore.toMinutes/SWCore.overlaps, igual que el
+  servidor. Verificado con un harness en Node que corre el mismo matrix de
+  casos de docs/superpowers/plans/2026-08-24-shared-modules-plan.md (Task 5);
+  SIGUE PENDIENTE una verificación real en navegador/emulador (no había
+  firebase-tools instalado en el entorno donde se hizo este cambio) antes de
+  confiar en esto en staging. hoursRangeFor()/dowOfDateKey()/dateKeyToDate()/
+  parseDt()/parseYmd() siguen locales a propósito -- no son duplicados de
+  shared/, resuelven un problema distinto (presentación o forma de retorno).
+  Cambiar una regla en shared/ requiere correr `npm run build:core` para que
+  se refleje en el bundle -- no hay CI que lo automatice todavía (ver el
+  bullet de despliegue manual más abajo; ese mismo riesgo de "paso manual
+  olvidado" aplica ahora también al bundle).
   Validación: functions/shared/validate.js es la única implementación real
   (isValidBookingPayload). firestore.rules mantiene isValidBooking() como copia
   CEL muerta (documentación) y isValidEmail() como el único gate real del camino
