@@ -14,4 +14,5 @@ module.exports = Object.assign(
   require('./timezone.js'),
   require('./validate.js'),
   require('./status.js'),
+  require('./resource.js'),
 );

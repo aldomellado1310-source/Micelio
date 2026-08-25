@@ -158,6 +158,31 @@ Estado conocido, a verificar antes de tocar nada:
   aislamiento de datos con el emulador real de reglas
   (tests/rules/tenant-lifecycle.rules.test.js, 9 tests). Sigue pendiente una
   prueba real en navegador contra Firebase, igual que goals 2/3.
+  Etapa A -- modelo de datos de negocio dentro de un tenant (arranca en el goal 9,
+  ya sobre el esquema con tenantId del goal 6; no hay una versión sin tenant que
+  migrar después):
+  Goal 9: `functions/shared/resource.js` define el modelo de `resource`
+  (reemplaza "el recurso es el barbero" -- puede ser `kind:'person'`,
+  `'space'` o `'equipment'`), agnóstico de tenant igual que el resto de
+  `shared/`. `schedule[0..6]` reusa DELIBERADAMENTE el mismo shape que ya
+  usa `staff.schedule` en Scissor White hoy (`{open,start,end,break:{start,end}}`,
+  ver `computeAvailability` en `functions/shared/availability.js`) -- no se
+  inventa un formato nuevo, para que la migración staff -> resources del
+  goal 17 no tenga que transformar este campo. `profile{photo,bio}` es
+  EXCLUSIVO de `kind:'person'` -- `isValidResourcePayload()` rechaza un
+  `space`/`equipment` que traiga `profile`. Vive únicamente en
+  `tenants/{tenantId}/resources/{id}` (subcolección del goal 6, que ya
+  cubre el aislamiento tenant-vs-tenant estructuralmente) -- no existe ni
+  debe crearse una colección `resources` de nivel raíz;
+  `tests/rules/resource.rules.test.js` prueba contra el emulador tanto la
+  forma real del documento (person con profile, space sin profile) como que
+  una ruta `/resources/{id}` sin tenantId cae por deny-all implícito, no
+  por convención. Todavía SIN callable de escritura (create/update de un
+  resource sigue siendo, por ahora, fuera de alcance de este goal) ni
+  wiring en ningún panel HTML -- goal 9 solo entrega el modelo de datos y
+  su validación; conectarlo a un panel de negocio multi-tenant real es
+  trabajo de goals posteriores (y del goal 17 para Scissor White en
+  particular).
 - Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
   desplegar (ya no ocho nombres a mano en README.md).
   `functions/scripts/printDeployTargets.js` arma el `--only` de

@@ -184,6 +184,59 @@ var SWCore = (() => {
     }
   });
 
+  // functions/shared/resource.js
+  var require_resource = __commonJS({
+    "functions/shared/resource.js"(exports, module) {
+      "use strict";
+      var RESOURCE_KINDS = ["person", "space", "equipment"];
+      var DAYS_PER_WEEK = 7;
+      var HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+      function isValidHHMM(v) {
+        return typeof v === "string" && HHMM_RE.test(v);
+      }
+      function isValidScheduleBreak(brk) {
+        if (brk === void 0) return true;
+        return brk !== null && typeof brk === "object" && isValidHHMM(brk.start) && isValidHHMM(brk.end);
+      }
+      function isValidScheduleDay(day) {
+        if (!day || typeof day !== "object") return false;
+        if (typeof day.open !== "boolean") return false;
+        if (!day.open) return true;
+        return isValidHHMM(day.start) && isValidHHMM(day.end) && isValidScheduleBreak(day.break);
+      }
+      function isValidSchedule(schedule) {
+        return Array.isArray(schedule) && schedule.length === DAYS_PER_WEEK && schedule.every(isValidScheduleDay);
+      }
+      function isValidProfile(profile) {
+        if (profile === void 0) return true;
+        if (profile === null || typeof profile !== "object") return false;
+        if (profile.photo !== void 0 && typeof profile.photo !== "string") return false;
+        if (profile.bio !== void 0 && typeof profile.bio !== "string") return false;
+        return true;
+      }
+      function isValidResourcePayload(data) {
+        if (!data || typeof data !== "object") return false;
+        if (RESOURCE_KINDS.indexOf(data.kind) === -1) return false;
+        if (typeof data.name !== "string" || data.name.trim().length === 0) return false;
+        if (typeof data.active !== "boolean") return false;
+        if (!isValidSchedule(data.schedule)) return false;
+        if (data.kind === "person") {
+          if (!isValidProfile(data.profile)) return false;
+        } else if (data.profile !== void 0) {
+          return false;
+        }
+        return true;
+      }
+      module.exports = {
+        RESOURCE_KINDS,
+        DAYS_PER_WEEK,
+        isValidResourcePayload,
+        isValidSchedule,
+        isValidScheduleDay
+      };
+    }
+  });
+
   // functions/shared/index.js
   var require_index = __commonJS({
     "functions/shared/index.js"(exports, module) {
@@ -192,7 +245,8 @@ var SWCore = (() => {
         require_availability(),
         require_timezone(),
         require_validate(),
-        require_status()
+        require_status(),
+        require_resource()
       );
     }
   });
