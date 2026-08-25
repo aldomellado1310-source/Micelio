@@ -32,9 +32,10 @@ Estado conocido, a verificar antes de tocar nada:
   parseDt()/parseYmd() siguen locales a propósito -- no son duplicados de
   shared/, resuelven un problema distinto (presentación o forma de retorno).
   Cambiar una regla en shared/ requiere correr `npm run build:core` para que
-  se refleje en el bundle -- no hay CI que lo automatice todavía (ver el
-  bullet de despliegue manual más abajo; ese mismo riesgo de "paso manual
-  olvidado" aplica ahora también al bundle).
+  se refleje en el bundle -- el CI (goal 4, ver más abajo) NO verifica que el
+  bundle esté al día, solo que functions/index.js y functions/deploy-list.json
+  coincidan; ese riesgo de "paso manual olvidado" para el bundle sigue sin
+  cubrir.
   Validación: functions/shared/validate.js es la única implementación real
   (isValidBookingPayload). firestore.rules mantiene isValidBooking() como copia
   CEL muerta (documentación) y isValidEmail() como el único gate real del camino
@@ -48,8 +49,20 @@ Estado conocido, a verificar antes de tocar nada:
 - log() escribe en memoria; saveAdmin() solo persiste services, staff y businessInfo.
   adminLog nunca se escribe desde el panel.
 - computeAvailability no filtra por status.
-- Despliegue manual con ocho nombres de función a mano; createBooking ya quedó
-  fuera de esa lista una vez y se congeló en silencio.
+- Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
+  desplegar (ya no ocho nombres a mano en README.md).
+  `functions/scripts/printDeployTargets.js` arma el `--only` de
+  `firebase deploy` a partir de ese JSON. CI (.github/workflows/ci.yml,
+  goal 4) corre en cada push/PR: `functions/scripts/checkDeployList.js`
+  (falla si `functions/index.js` exporta algo que no está en
+  deploy-list.json -- el incidente real de createBooking, 2026-08-23), los
+  tests de `functions/` (`node --test`, incluye el cross-check de goal 3), y
+  los tests de reglas contra el emulador de Firestore+Storage
+  (`npm run test:rules`). De paso se corrigió un bug real preexistente en ese
+  script: solo levantaba el emulador de Firestore (`--only firestore`) y
+  tests/rules/storage.rules.test.js fallaba siempre por falta del emulador de
+  Storage -- ahora `--only firestore,storage`. El deploy sigue siendo manual
+  (Aldo lo corre); el CI no despliega nada, solo verifica.
 
 INVARIANTES — ningún goal puede romperlos:
 - La zona horaria del negocio gobierna, nunca la del navegador (IANA, zonedInstant()).

@@ -170,26 +170,24 @@ cd functions && node --test
 ```bash
 # Hosting + reglas/índices de Firestore + solo las funciones de este repo
 # (nombres explícitos: evita que el CLI ofrezca borrar `api`, ver nota arriba)
-firebase deploy --project scissor-white --only \
-  hosting,firestore:rules,firestore:indexes,\
-functions:onBookingCreated,functions:createBooking,functions:getClubStatus,\
-functions:getAvailability,functions:onBookingWritten,functions:onScheduleBlockWritten,\
-functions:refreshGoogleReviews,functions:syncGoogleReviews
+# --only se arma leyendo functions/deploy-list.json -- NO lo escribas a mano.
+firebase deploy --project scissor-white --only "$(node functions/scripts/printDeployTargets.js)"
 ```
 
-Son **8 nombres — uno por cada `exports.` de `functions/index.js`**. Antes de
-deployar, verificar que no falte ninguno:
+La lista de funciones vive en `functions/deploy-list.json`, no en este README:
+`functions/scripts/printDeployTargets.js` la lee y arma el `--only` completo.
+El CI (`.github/workflows/ci.yml`) corre `npm run check:deploy-list` en cada
+push/PR y **falla el build** si `functions/index.js` exporta algo que no está
+en `functions/deploy-list.json` — ya no hace falta acordarse de correr un
+`grep` a mano antes de deployar.
 
-```bash
-grep -oE "^exports\.[a-zA-Z]+" functions/index.js
-```
-
-> ⚠️ `createBooking` **faltaba en esta lista** hasta 2026-08-23: se agregó en
-> Fase A y el comando documentado nunca se actualizó. Un deploy con la lista
-> vieja no rompe nada de forma visible — las funciones ausentes simplemente no
-> se actualizan — pero deja `createBooking` congelado en la versión desplegada,
-> en silencio. Es exactamente el tipo de deriva que este comando explícito
-> existe para evitar, así que conviene correr el `grep` de arriba cada vez.
+> ⚠️ `createBooking` **faltaba en la lista de deploy** hasta 2026-08-23: se
+> agregó en Fase A y el comando documentado (entonces con los 8 nombres
+> escritos a mano acá mismo) nunca se actualizó. Un deploy con la lista vieja
+> no rompe nada de forma visible — las funciones ausentes simplemente no se
+> actualizan — pero deja la función congelada en la versión desplegada, en
+> silencio. `functions/deploy-list.json` + el check de CI existen
+> específicamente para que ese incidente no se repita.
 
 `refreshGoogleReviews` es la primera función programada del proyecto: su primer
 deploy habilita Cloud Scheduler en el proyecto de GCP.
