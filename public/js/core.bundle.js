@@ -303,6 +303,44 @@ var SWCore = (() => {
     }
   });
 
+  // functions/shared/booking.js
+  var require_booking = __commonJS({
+    "functions/shared/booking.js"(exports, module) {
+      "use strict";
+      var { DEFAULT_BOOKING_STATUS } = require_status();
+      var STATUS_HISTORY_MAX = 20;
+      function appendStatusHistory(history, entry) {
+        const next = (Array.isArray(history) ? history : []).concat([entry]);
+        return next.length > STATUS_HISTORY_MAX ? next.slice(next.length - STATUS_HISTORY_MAX) : next;
+      }
+      function buildBookingLifecycleFields({ resourceIds, now, actor }) {
+        const ids = Array.isArray(resourceIds) ? resourceIds : [];
+        const nowIso = now.toISOString();
+        return {
+          status: DEFAULT_BOOKING_STATUS,
+          statusAt: nowIso,
+          statusReason: null,
+          statusHistory: appendStatusHistory([], {
+            status: DEFAULT_BOOKING_STATUS,
+            at: nowIso,
+            reason: null,
+            by: actor || null
+          }),
+          resourceIds: ids,
+          barberId: ids[0] || null,
+          // DEPRECADO -- ver comentario de cabecera.
+          remindAt: null,
+          reminderSentAt: null,
+          manageTokenV: 0,
+          modifiedCount: 0,
+          updatedBy: actor || null,
+          updatedAt: nowIso
+        };
+      }
+      module.exports = { STATUS_HISTORY_MAX, appendStatusHistory, buildBookingLifecycleFields };
+    }
+  });
+
   // functions/shared/index.js
   var require_index = __commonJS({
     "functions/shared/index.js"(exports, module) {
@@ -313,7 +351,8 @@ var SWCore = (() => {
         require_validate(),
         require_status(),
         require_resource(),
-        require_service()
+        require_service(),
+        require_booking()
       );
     }
   });

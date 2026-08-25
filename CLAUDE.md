@@ -208,6 +208,26 @@ Estado conocido, a verificar antes de tocar nada:
   un bug deliberado (ignorar bufferMin), revertido antes de commitear, igual
   criterio que crosscheck.solape.test.js del goal 3. Sin callable ni wiring
   en ningún panel todavía -- mismo alcance que el goal 9.
+  Goal 11: `functions/shared/booking.js#buildBookingLifecycleFields()`
+  inicializa los campos de ciclo de vida de una reserva tenant-aware:
+  status/statusAt/statusReason/statusHistory[] (acotado a
+  STATUS_HISTORY_MAX=20 vía `appendStatusHistory()`, descarta las entradas
+  MÁS VIEJAS), resourceIds[], remindAt, reminderSentAt, manageTokenV,
+  modifiedCount, updatedBy, updatedAt. `resourceIds[]` es la fuente de
+  verdad (goal 9/10); `barberId` queda DEPRECADO y se sincroniza como espejo
+  de `resourceIds[0]` SOLO mientras el widget viejo de Scissor White (que
+  hoy lee/escribe `barberId` directo) siga en circulación -- se retira en el
+  goal 17, ningún código nuevo debe leerlo para decidir nada.
+  `remindAt`/`reminderSentAt`/`manageTokenV`/`modifiedCount` se crean ahora
+  con un valor placeholder (null/0) pero nada los interpreta todavía -- son
+  para la etapa C (recordatorios, autogestión), fuera de alcance de las
+  etapas 0/T/A. `actor` (uid de quien crea la reserva) es `null` para el
+  flujo público sin autenticar (mismo caso que `createBooking` hoy, Admin
+  SDK sin `request.auth`) -- un actor real llega recién con las
+  transiciones de estado del goal 12/13. Sin callable ni wiring en ningún
+  panel todavía, ni cambios a `functions/createBooking.js` (Scissor White
+  sigue con `status:'pending'` fijo y `deleteBooking` hasta el goal 13) --
+  mismo alcance que goals 9/10.
 - Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
   desplegar (ya no ocho nombres a mano en README.md).
   `functions/scripts/printDeployTargets.js` arma el `--only` de

@@ -16,4 +16,5 @@ module.exports = Object.assign(
   require('./status.js'),
   require('./resource.js'),
   require('./service.js'),
+  require('./booking.js'),
 );
