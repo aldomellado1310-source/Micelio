@@ -20,11 +20,15 @@ Estado conocido, a verificar antes de tocar nada:
   ahora alias o llamadas directas a SWCore. checkConflict()/checkScheduleBlock()
   del admin YA NO arman objetos Date en hora del navegador -- usan minutos-
   desde-medianoche vía SWCore.toMinutes/SWCore.overlaps, igual que el
-  servidor. Verificado con un harness en Node que corre el mismo matrix de
-  casos de docs/superpowers/plans/2026-08-24-shared-modules-plan.md (Task 5);
-  SIGUE PENDIENTE una verificación real en navegador/emulador (no había
-  firebase-tools instalado en el entorno donde se hizo este cambio) antes de
-  confiar en esto en staging. hoursRangeFor()/dowOfDateKey()/dateKeyToDate()/
+  servidor. Cubierto por functions/test/crosscheck.solape.test.js (goal 3):
+  corre el TEXTO ACTUAL de isBarberFreeAt()/checkConflict() de ambos HTML
+  contra functions/shared/availability.js#isRangeFree para el mismo set de
+  casos -- revienta si cualquiera de los tres diverge (probado a propósito
+  con un bug deliberado, revertido antes de commitear). SIGUE PENDIENTE una
+  verificación real en navegador/emulador (no había firebase-tools instalado
+  en el entorno donde se hizo este cambio) antes de confiar en esto en
+  staging -- el cross-check en Node no reemplaza esa prueba, solo da
+  regresión automática. hoursRangeFor()/dowOfDateKey()/dateKeyToDate()/
   parseDt()/parseYmd() siguen locales a propósito -- no son duplicados de
   shared/, resuelven un problema distinto (presentación o forma de retorno).
   Cambiar una regla en shared/ requiere correr `npm run build:core` para que
