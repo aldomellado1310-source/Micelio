@@ -4,6 +4,16 @@ Sistema de agendamiento sobre Firebase (Hosting, Firestore, Functions Node 22
 en southamerica-east1, Auth, Storage). Producción: scissorwhite.cl.
 Resend para correo, Google Places para reseñas.
 
+Proyectos GCP separados a propósito (ver README.md#Contexto:-Micelio):
+`scissor-white` (este repo, producción de Scissor White, `.firebaserc` default)
+y `registrago001` (base de la futura plataforma Micelio, cuenta de facturación
+aparte). El trabajo de Etapa T/A del pool ReservaGo (tenants/, subcolecciones
+por tenant, etc.) apunta conceptualmente a `registrago001` -- no interfiere
+con la producción de Scissor White aunque viva en el mismo repo/firestore.rules,
+porque son bases de datos completamente distintas. No mezclar ambos proyectos
+en un deploy hasta que exista una decisión explícita de migrar Scissor White
+(ese es el goal de cierre 17).
+
 public/index.html        landing + widget de reservas, ~4.000 líneas, JS y CSS inline
 public/admin/index.html  panel admin, ~3.700 líneas, JS y CSS inline
 public/js/data.js        única capa que habla con Firestore, Storage y Functions
@@ -72,6 +82,21 @@ Estado conocido, a verificar antes de tocar nada:
   -- solo Admin SDK, hasta que exista `platformRole:'superadmin'` (goal 7).
   No hay datos reales todavía (no se migró nada de Scissor White, eso es el
   goal de cierre 17).
+  Goal 6: `tenants/{tenantId}/{resources,services,bookings,holds,auditLog,
+  dataRequests}/...` tienen regla de aislamiento genérica en firestore.rules
+  (`match /tenants/{tenantId}/{collection}/{docId}`, exige
+  `request.auth.token.tenantId == tenantId` y el nombre de colección en la
+  lista permitida) -- probada con claims sintéticos vía authenticatedContext()
+  en tests/rules/tenant-isolation.rules.test.js (31 tests: cada una de las
+  seis colecciones, tenant propio permitido, tenant ajeno denegado, anónimo
+  denegado, isAdmin() sin tenantId denegado). request.auth.token.tenantId es
+  la forma de claim que el goal 7 recién va a EMITIR (setUserRole) -- la
+  regla ya la exige desde ahora, sin esperar a que ese callable exista. A
+  propósito SIN roles finos (owner/reception/staff+resourceId, goal 14) ni
+  excepción de superadmin (goal 7/8) -- solo aislamiento tenant-vs-tenant.
+  Las colecciones de nivel raíz (services/staff/bookings) NO se tocaron --
+  siguen siendo las que usa Scissor White hoy; el corte real a esta ruta es
+  el goal 17, no este.
 - Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
   desplegar (ya no ocho nombres a mano en README.md).
   `functions/scripts/printDeployTargets.js` arma el `--only` de

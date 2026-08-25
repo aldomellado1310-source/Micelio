@@ -111,5 +111,33 @@ service cloud.firestore {
     // Escritura solo Admin SDK -- no existe todavía un alta de tenants desde
     // el cliente (eso es el panel de plataforma, goal 8).
     match /tenantsByDomain/{dominio} { allow read: if true; allow write: if false; }
+
+    // ══ SUBCOLECCIONES POR TENANT (Etapa T, goal 6) ══
+    // resources, services, bookings, holds, auditLog, dataRequests: el
+    // aislamiento entre tenants lo garantiza la RUTA del documento (esta
+    // regla), no la disciplina de quien escribe cada query -- exactamente el
+    // problema que hoy sufre isAdmin() con el UID a mano (un campo tenantId
+    // suelto en un where() se puede olvidar; una subcolección con esta regla,
+    // no). request.auth.token.tenantId es la forma de claim que el goal 7
+    // recién va a EMITIR (setUserRole) -- esta regla ya la exige desde ahora,
+    // a propósito: no hace falta que exista el callable que la emite para que
+    // la regla esté lista y probada (ver tests/rules/tenant-isolation.rules.test.js,
+    // que la ejercita con claims sintéticos vía authenticatedContext()).
+    //
+    // Deliberadamente SIN roles todavía (owner/reception/staff+resourceId,
+    // goal 14) ni excepción de platformRole:'superadmin' (goal 7/8) -- goal 6
+    // solo pide aislamiento tenant-vs-tenant, no control de acceso fino
+    // dentro de un mismo tenant. Agregar esos dos es trabajo de goals
+    // posteriores, no de este.
+    //
+    // NO reemplaza services/staff/bookings de más arriba: esas colecciones
+    // de nivel raíz siguen siendo las que usa Scissor White en producción
+    // hoy (proyecto GCP `scissor-white`, separado a propósito del proyecto
+    // de la plataforma -- ver README.md#Contexto:-Micelio). El corte real de
+    // esas colecciones a esta ruta es el goal 17 (migración), no este.
+    match /tenants/{tenantId}/{collection}/{docId} {
+      allow read, write: if collection in ['resources', 'services', 'bookings', 'holds', 'auditLog', 'dataRequests']
+        && request.auth != null && request.auth.token.tenantId == tenantId;
+    }
   }
 }
