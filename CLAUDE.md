@@ -4,6 +4,16 @@ Sistema de agendamiento sobre Firebase (Hosting, Firestore, Functions Node 22
 en southamerica-east1, Auth, Storage). Producción: scissorwhite.cl.
 Resend para correo, Google Places para reseñas.
 
+Proyectos GCP separados a propósito (ver README.md#Contexto:-Micelio):
+`scissor-white` (este repo, producción de Scissor White, `.firebaserc` default)
+y `registrago001` (base de la futura plataforma Micelio, cuenta de facturación
+aparte). El trabajo de Etapa T/A del pool ReservaGo (tenants/, subcolecciones
+por tenant, etc.) apunta conceptualmente a `registrago001` -- no interfiere
+con la producción de Scissor White aunque viva en el mismo repo/firestore.rules,
+porque son bases de datos completamente distintas. No mezclar ambos proyectos
+en un deploy hasta que exista una decisión explícita de migrar Scissor White
+(ese es el goal de cierre 17).
+
 public/index.html        landing + widget de reservas, ~4.000 líneas, JS y CSS inline
 public/admin/index.html  panel admin, ~3.700 líneas, JS y CSS inline
 public/js/data.js        única capa que habla con Firestore, Storage y Functions
@@ -68,10 +78,42 @@ Estado conocido, a verificar antes de tocar nada:
   a resources/services/bookings (eso son los goals siguientes). Los
   callables existentes (createBooking, getAvailability, etc.) siguen
   invocándose igual que siempre, sin rewrite, sin tocar. `tenants/{tenantId}`
-  no es legible ni escribible desde ningún claim hoy (ni siquiera isAdmin())
-  -- solo Admin SDK, hasta que exista `platformRole:'superadmin'` (goal 7).
-  No hay datos reales todavía (no se migró nada de Scissor White, eso es el
-  goal de cierre 17).
+  es legible/escribible solo por `isSuperadmin()` desde el goal 7 (antes,
+  `if false` -- ni siquiera isAdmin()). No hay datos reales todavía (no se
+  migró nada de Scissor White, eso es el goal de cierre 17).
+  Goal 6: `tenants/{tenantId}/{resources,services,bookings,holds,auditLog,
+  dataRequests}/...` tienen regla de aislamiento genérica en firestore.rules
+  (`match /tenants/{tenantId}/{collection}/{docId}`, exige
+  `request.auth.token.tenantId == tenantId` y el nombre de colección en la
+  lista permitida) -- probada con claims sintéticos vía authenticatedContext()
+  en tests/rules/tenant-isolation.rules.test.js (31 tests: cada una de las
+  seis colecciones, tenant propio permitido, tenant ajeno denegado, anónimo
+  denegado, isAdmin() sin tenantId denegado). request.auth.token.tenantId es
+  la forma de claim que el goal 14 recién va a EMITIR (setUserRole) -- la
+  regla ya la exige desde ahora, sin esperar a que ese callable exista. A
+  propósito SIN roles finos (owner/reception/staff+resourceId, goal 14) ni
+  excepción de superadmin (goal 7/8) -- solo aislamiento tenant-vs-tenant.
+  Las colecciones de nivel raíz (services/staff/bookings) NO se tocaron --
+  siguen siendo las que usa Scissor White hoy; el corte real a esta ruta es
+  el goal 17, no este.
+  Goal 7: `platformRole:'superadmin'` es un nivel de rol SEPARADO del role de
+  negocio de un tenant (owner/reception/staff+tenantId, goal 14) -- nunca se
+  mezclan en el mismo claim ni en la misma función de reglas
+  (`isSuperadmin()` en firestore.rules, independiente de `isAdmin()` y del
+  chequeo de `tenantId` del goal 6). `functions/platformRole.js#setPlatformRole`
+  es la única forma de otorgar el rol vía código, y exige que quien lo invoque
+  YA sea superadmin -- ningún callable puede auto-otorgárselo. Hace MERGE de
+  claims (nunca overwrite) al escribir, a diferencia de
+  `functions/scripts/setAdminClaim.js` (que sobreescribe sin mirar, pero
+  vive en el proyecto scissor-white donde hoy no hay nada más que perder).
+  El primer superadmin se asigna a mano con
+  `functions/scripts/setPlatformRole.js` contra el proyecto `registrago001`
+  (ver README.md#Primer-superadmin-de-la-plataforma) -- no por consola de
+  Firebase en sentido literal (esa UI no expone custom claims), sino corrido
+  fuera de la app con credenciales reales, mismo patrón que setAdminClaim.js.
+  Probado que un superadmin puro NO puede leer/escribir ni las colecciones de
+  nivel raíz de Scissor White ni ninguna subcolección de tenant (goal 6) --
+  tests/rules/platform-role.rules.test.js, 5 tests contra el emulador real.
 - Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
   desplegar (ya no ocho nombres a mano en README.md).
   `functions/scripts/printDeployTargets.js` arma el `--only` de

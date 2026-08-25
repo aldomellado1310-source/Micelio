@@ -20,10 +20,14 @@ Concepción, Chile): landing, sistema de reservas online y panel de administraci
 Este codebase es la semilla sobre la que Micorriza (empresa de desarrollo) está
 construyendo **Micelio**, un producto SaaS de agendamiento (nombre de marca;
 el repo previo se llamó RegistraGo). Scissor White es el negocio piloto: hoy
-el código sigue siendo *single-tenant* (ver invariantes y prohibiciones de
-etapa en `CLAUDE.md`), sin ninguna generalización multi-cliente todavía — eso
-es trabajo futuro sin planificar, que requiere su propio spec antes de tocar
-código.
+el código de producción sigue siendo *single-tenant* (ver invariantes y
+prohibiciones de etapa en `CLAUDE.md`) — Scissor White no ha migrado ni un
+dato real todavía (eso es el goal de cierre 17 del pool ReservaGo). La
+generalización multi-cliente SÍ tiene spec y SÍ está en curso (pool de
+prompts ReservaGo, Etapa T): `tenants/{tenantId}`, resolución de tenant por
+dominio, aislamiento por subcolección y roles de plataforma ya existen en el
+código (ver "Estado conocido" en `CLAUDE.md`) — lo que falta es conectarlos
+al negocio real y migrar Scissor White como cliente cero.
 
 Estructura de proyectos GCP/Firebase (separada a propósito, 2026-08-25):
 
@@ -33,7 +37,29 @@ Estructura de proyectos GCP/Firebase (separada a propósito, 2026-08-25):
 | `registrago001` | Base de la futura plataforma Micelio (project ID histórico, no se puede renombrar) | Micelio (cuenta propia, separada de clientes) |
 
 No mezclar ambos proyectos hasta que exista una decisión de producto explícita
-sobre migrar Scissor White como tenant de la plataforma.
+sobre migrar Scissor White como tenant de la plataforma. El trabajo de
+tenencia (Etapa T/A del pool) apunta conceptualmente a `registrago001` -- vive
+en el mismo repo/`firestore.rules` que Scissor White, pero son bases de datos
+Firestore completamente distintas, así que no hay riesgo de interferencia.
+
+### Primer superadmin de la plataforma
+
+`platformRole:'superadmin'` (Etapa T, goal 7) es el rol que opera Micelio
+(Micorriza) — separado del rol de negocio de cada tenant. El callable
+`setPlatformRole` exige que quien lo invoque YA sea superadmin, así que no
+existe ningún camino de app para otorgarse este rol por primera vez. El
+primer superadmin de `registrago001` se asigna a mano, fuera de la app:
+
+```bash
+cd functions
+GOOGLE_APPLICATION_CREDENTIALS=/ruta/service-account-registrago001.json \
+  node scripts/setPlatformRole.js superadmin@micorriza.cl
+```
+
+(o con `gcloud auth application-default login` en vez de la service account).
+El usuario debe cerrar sesión y volver a entrar para que el claim tome
+efecto. Mismo patrón que `scripts/setAdminClaim.js` usa para `admin:true` en
+`scissor-white` — ver esa sección de `functions/scripts/`.
 
 ## Arquitectura
 
@@ -119,7 +145,7 @@ scissor-white/
 │   ├── email.js          # render del template de email + envío vía Resend
 │   ├── patients.js       # upsert de clientes + conteo Club SW
 │   ├── availability.js   # cálculo de disponibilidad (reservas + colación + bloqueos)
-│   ├── scripts/          # reconcileCatalog, backfillAvailability, setAdminClaim
+│   ├── scripts/          # reconcileCatalog, backfillAvailability, setAdminClaim, setPlatformRole
 │   └── test/             # node --test (sin emulador)
 ├── seed/                 # carga inicial a Firestore
 ├── tests/rules/          # tests de reglas con el emulador

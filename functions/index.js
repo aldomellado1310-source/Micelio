@@ -7,6 +7,7 @@ const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getAuth } = require('firebase-admin/auth');
 const { sendBookingEmails } = require('./email.js');
 const { buildPatientUpsert, countClubVisits } = require('./patients.js');
 const { computeAvailability, dateKeyOf, dayBoundsOf } = require('./shared/availability.js');
@@ -14,6 +15,7 @@ const { resolveCreateBooking } = require('./createBooking.js');
 const { resolveBusinessTz, resolveBufferMin } = require('./shared/timezone.js');
 const { searchPlaceId, fetchPlaceDetails, isFresh } = require('./googleReviews.js');
 const { resolveTenantId, assertTenantIdMatches } = require('./tenant.js');
+const { setPlatformRole } = require('./platformRole.js');
 
 const app = initializeApp();
 const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
@@ -464,4 +466,15 @@ exports.resolveTenant = onCall(
     assertTenantIdMatches(resolved.tenantId, request.data && request.data.tenantId);
     return resolved;
   }
+);
+
+// setPlatformRole (Etapa T, goal 7 del pool ReservaGo): única forma de
+// otorgar platformRole:'superadmin' vía código -- solo invocable por un
+// superadmin YA existente (ver functions/platformRole.js#assertSuperadmin).
+// El primer superadmin se asigna a mano, fuera de la app, con
+// functions/scripts/setPlatformRole.js (ver README.md) -- ningún callable
+// puede auto-otorgarse el rol más alto.
+exports.setPlatformRole = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => setPlatformRole(request, getAuth(app))
 );

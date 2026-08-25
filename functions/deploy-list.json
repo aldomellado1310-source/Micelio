@@ -9,6 +9,7 @@
     "onScheduleBlockWritten",
     "refreshGoogleReviews",
     "syncGoogleReviews",
-    "resolveTenant"
+    "resolveTenant",
+    "setPlatformRole"
   ]
 }
