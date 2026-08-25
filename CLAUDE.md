@@ -183,6 +183,31 @@ Estado conocido, a verificar antes de tocar nada:
   su validación; conectarlo a un panel de negocio multi-tenant real es
   trabajo de goals posteriores (y del goal 17 para Scissor White en
   particular).
+  Goal 10: `functions/shared/service.js` define `requires:
+  [{kind,anyOf,count}]` de un servicio -- una cita puede necesitar varios
+  recursos a la vez (una persona Y un box). `normalizeServiceRequires()` es
+  la ÚNICA función que debe leer `service.requires`: un servicio sin
+  requires (o con `requires` vacío) devuelve siempre `DEFAULT_REQUIRES`
+  (`[{kind:'person', anyOf:null, count:1}]`) -- el REQUISITO DURO del goal,
+  formalizado como dato en vez de dejarlo implícito en cómo agrupaba
+  computeAvailability(). `functions/shared/availability.js` gana
+  `computeResourceAvailability()`/`isServiceBookableAt()`, la generalización
+  tenant-aware de `computeAvailability()`/`isRangeFree()` -- agrupa
+  ocupación por `resourceIds[]` de la reserva (no por un único `barberId`) y
+  exige que CADA requerimiento tenga suficientes recursos libres del kind
+  correcto. Coexiste con `computeAvailability()`: Scissor White sigue usando
+  staff/barberId hasta la migración del goal 17. `bookings.resourceIds[]`
+  usado acá es el campo que el goal 11 recién va a agregar a los documentos
+  reales -- este goal solo lo consume como forma de parámetro puro, no
+  escribe ningún booking todavía. `functions/test/service.crosscheck.test.js`
+  prueba el REQUISITO DURO contra una captura real de
+  computeAvailability()/isRangeFree() para una jornada completa (múltiples
+  barberos, reservas, colación y un bloqueo): el motor nuevo con el
+  requires por defecto debe producir el mismo booleano "agendable" que el
+  motor viejo en CADA slot de 15 minutos del día -- probado a propósito con
+  un bug deliberado (ignorar bufferMin), revertido antes de commitear, igual
+  criterio que crosscheck.solape.test.js del goal 3. Sin callable ni wiring
+  en ningún panel todavía -- mismo alcance que el goal 9.
 - Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
   desplegar (ya no ocho nombres a mano en README.md).
   `functions/scripts/printDeployTargets.js` arma el `--only` de

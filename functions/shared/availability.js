@@ -183,7 +183,84 @@ function isWithinOpenHours(schedule, dow, startHHMM, endHHMM) {
   return toMinutes(startHHMM) >= toMinutes(day.start) && toMinutes(endHHMM) <= toMinutes(day.end);
 }
 
+// ══ DISPONIBILIDAD MULTI-RECURSO (Etapa A, goal 10 del pool ReservaGo) ══
+//
+// Generalización de computeAvailability()/isRangeFree() de más arriba para
+// tenants con resources (goal 9) y services.requires (shared/service.js):
+// una cita puede necesitar varios recursos a la vez (una persona Y un box),
+// no solo "un barbero". Coexiste con computeAvailability() -- Scissor White
+// sigue usando staff/barberId hasta la migración del goal 17, esto es lo que
+// usará un tenant nuevo desde el goal 11 en adelante (cuando bookings tenga
+// resourceIds[]).
+//
+// computeResourceAvailability(): mismo criterio que computeAvailability
+// (agrupa ocupación por id, agrega colación recurrente vía schedule[dow] y
+// bloqueos puntuales), pero por `resourceIds[]` de la reserva en vez de un
+// único `barberId` -- una reserva que necesitó 2 recursos ocupa a los 2.
+function computeResourceAvailability({ bookings, resources, dow, scheduleBlocks }) {
+  const resourceBusy = {};
+  function addBusy(id, start, end, kind) {
+    if (!id) return;
+    if (!resourceBusy[id]) resourceBusy[id] = [];
+    resourceBusy[id].push({ start, end, kind });
+  }
+
+  (bookings || []).forEach((b) => {
+    const end = addMinutesToTime(b.time, b.dur || 0);
+    (b.resourceIds || []).forEach((id) => addBusy(id, b.time, end, 'booking'));
+  });
+
+  const activeResources = (resources || []).filter((r) => r.active);
+
+  // Colación recurrente (resource.schedule[dow].break) -- mismo criterio que
+  // computeAvailability: solo si se pasó `dow`.
+  if (typeof dow === 'number') {
+    activeResources.forEach((r) => {
+      const day = Array.isArray(r.schedule) ? r.schedule[dow] : null;
+      if (day && day.break && day.break.start && day.break.end) {
+        addBusy(r.id, day.break.start, day.break.end, 'break');
+      }
+    });
+  }
+
+  // Bloqueos puntuales -- `resourceId` (no `barberId`) porque un bloqueo
+  // ahora puede apuntar a cualquier kind de recurso, no solo a una persona.
+  (scheduleBlocks || []).forEach((blk) => {
+    if (!blk.resourceId) return;
+    addBusy(blk.resourceId, blk.start, blk.end, 'block');
+  });
+
+  return { resourceBusy, activeResources };
+}
+
+// ¿el requerimiento `{kind, anyOf, count}` tiene suficientes recursos
+// libres en [startHHMM,endHHMM)? `anyOf: null` (o ausente) considera TODOS
+// los recursos activos de ese kind como candidatos; si viene, acota a esos
+// ids. Reusa isRangeFree() -- mismo criterio de solape y buffer que el resto
+// del repo, ninguna copia nueva.
+function isRequirementFreeAt(requirement, activeResources, resourceBusy, startHHMM, endHHMM, bufferMin = 0) {
+  const candidates = activeResources.filter((r) => r.kind === requirement.kind
+    && (!requirement.anyOf || requirement.anyOf.indexOf(r.id) !== -1));
+  const freeCount = candidates.filter((r) => isRangeFree(resourceBusy[r.id] || [], startHHMM, endHHMM, bufferMin)).length;
+  return freeCount >= requirement.count;
+}
+
+// ¿el servicio (representado por su `requires` ya normalizado -- ver
+// normalizeServiceRequires en shared/service.js) puede agendarse en
+// [startHHMM,endHHMM)? Exige que CADA requerimiento tenga suficientes
+// recursos libres -- no que el total combinado alcance.
+//
+// REQUISITO DURO del goal 10: para el requires por defecto
+// (DEFAULT_REQUIRES = una persona activa cualquiera), esto debe producir
+// EXACTAMENTE el mismo resultado que el criterio legado (¿algún barbero
+// activo libre?) -- probado en test/service.crosscheck.test.js contra una
+// captura real de computeAvailability()/isRangeFree() para un día completo.
+function isServiceBookableAt(requires, activeResources, resourceBusy, startHHMM, endHHMM, bufferMin = 0) {
+  return (requires || []).every((req) => isRequirementFreeAt(req, activeResources, resourceBusy, startHHMM, endHHMM, bufferMin));
+}
+
 module.exports = {
   toMinutes, toHHMM, addMinutesToTime, computeAvailability, dateKeyOf, dayBoundsOf,
   overlaps, isRangeFree, isWithinOpenHours,
+  computeResourceAvailability, isRequirementFreeAt, isServiceBookableAt,
 };

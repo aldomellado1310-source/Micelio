@@ -15,4 +15,5 @@ module.exports = Object.assign(
   require('./validate.js'),
   require('./status.js'),
   require('./resource.js'),
+  require('./service.js'),
 );

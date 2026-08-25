@@ -81,6 +81,40 @@ var SWCore = (() => {
         if (!day || !day.open) return false;
         return toMinutes(startHHMM) >= toMinutes(day.start) && toMinutes(endHHMM) <= toMinutes(day.end);
       }
+      function computeResourceAvailability({ bookings, resources, dow, scheduleBlocks }) {
+        const resourceBusy = {};
+        function addBusy(id, start, end, kind) {
+          if (!id) return;
+          if (!resourceBusy[id]) resourceBusy[id] = [];
+          resourceBusy[id].push({ start, end, kind });
+        }
+        (bookings || []).forEach((b) => {
+          const end = addMinutesToTime(b.time, b.dur || 0);
+          (b.resourceIds || []).forEach((id) => addBusy(id, b.time, end, "booking"));
+        });
+        const activeResources = (resources || []).filter((r) => r.active);
+        if (typeof dow === "number") {
+          activeResources.forEach((r) => {
+            const day = Array.isArray(r.schedule) ? r.schedule[dow] : null;
+            if (day && day.break && day.break.start && day.break.end) {
+              addBusy(r.id, day.break.start, day.break.end, "break");
+            }
+          });
+        }
+        (scheduleBlocks || []).forEach((blk) => {
+          if (!blk.resourceId) return;
+          addBusy(blk.resourceId, blk.start, blk.end, "block");
+        });
+        return { resourceBusy, activeResources };
+      }
+      function isRequirementFreeAt(requirement, activeResources, resourceBusy, startHHMM, endHHMM, bufferMin = 0) {
+        const candidates = activeResources.filter((r) => r.kind === requirement.kind && (!requirement.anyOf || requirement.anyOf.indexOf(r.id) !== -1));
+        const freeCount = candidates.filter((r) => isRangeFree(resourceBusy[r.id] || [], startHHMM, endHHMM, bufferMin)).length;
+        return freeCount >= requirement.count;
+      }
+      function isServiceBookableAt(requires, activeResources, resourceBusy, startHHMM, endHHMM, bufferMin = 0) {
+        return (requires || []).every((req) => isRequirementFreeAt(req, activeResources, resourceBusy, startHHMM, endHHMM, bufferMin));
+      }
       module.exports = {
         toMinutes,
         toHHMM,
@@ -90,7 +124,10 @@ var SWCore = (() => {
         dayBoundsOf,
         overlaps,
         isRangeFree,
-        isWithinOpenHours
+        isWithinOpenHours,
+        computeResourceAvailability,
+        isRequirementFreeAt,
+        isServiceBookableAt
       };
     }
   });
@@ -237,6 +274,35 @@ var SWCore = (() => {
     }
   });
 
+  // functions/shared/service.js
+  var require_service = __commonJS({
+    "functions/shared/service.js"(exports, module) {
+      "use strict";
+      var { RESOURCE_KINDS } = require_resource();
+      var DEFAULT_REQUIRES = [{ kind: "person", anyOf: null, count: 1 }];
+      function isValidRequirement(req) {
+        if (!req || typeof req !== "object") return false;
+        if (RESOURCE_KINDS.indexOf(req.kind) === -1) return false;
+        if (req.anyOf !== void 0 && req.anyOf !== null) {
+          if (!Array.isArray(req.anyOf) || req.anyOf.length === 0) return false;
+          if (!req.anyOf.every((id) => typeof id === "string" && id.length > 0)) return false;
+        }
+        if (!Number.isInteger(req.count) || req.count < 1) return false;
+        return true;
+      }
+      function isValidRequires(requires) {
+        if (requires === void 0 || requires === null) return true;
+        return Array.isArray(requires) && requires.length > 0 && requires.every(isValidRequirement);
+      }
+      function normalizeServiceRequires(service) {
+        const requires = service && service.requires;
+        if (!Array.isArray(requires) || requires.length === 0) return DEFAULT_REQUIRES;
+        return requires;
+      }
+      module.exports = { DEFAULT_REQUIRES, isValidRequirement, isValidRequires, normalizeServiceRequires };
+    }
+  });
+
   // functions/shared/index.js
   var require_index = __commonJS({
     "functions/shared/index.js"(exports, module) {
@@ -246,7 +312,8 @@ var SWCore = (() => {
         require_timezone(),
         require_validate(),
         require_status(),
-        require_resource()
+        require_resource(),
+        require_service()
       );
     }
   });
