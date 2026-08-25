@@ -1,7 +1,11 @@
 // functions/shared/timezone.js — conversión entre hora de pared del negocio
 // y el instante UTC real que representa, vía IANA (Intl, ya incluido en Node
 // -- sin dependencia nueva). Sin dependencia de firebase-admin: mismo patrón
-// que availability.js/patients.js, testeable con node --test.
+// que availability.js/patients.js, testeable con node --test. Agnóstico de
+// tenant: toda función toma `tz`/`businessInfo` como parámetro (resolveBusinessTz,
+// zonedInstant, ...) en vez de asumir una zona fija — DEFAULT_TZ es solo el
+// fallback cuando el negocio no tiene una configurada, no un valor hardcodeado
+// para un negocio en particular.
 //
 // PRINCIPIO (Fase 2): la zona del NEGOCIO gobierna todo -- ni el navegador
 // del cliente ni el de quien administra el panel influyen en nada. La

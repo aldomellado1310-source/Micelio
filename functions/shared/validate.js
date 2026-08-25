@@ -14,6 +14,11 @@
 // servidor solo por isValidEmail() en firestore.rules -- un criterio mucho
 // más débil (solo formato de email, y opcional). Cerrar esa brecha es
 // trabajo aparte, fuera de alcance acá.
+//
+// Agnóstico de tenant: valida la forma del payload, no su contenido de
+// negocio -- no hay ninguna regla acá que dependa de qué negocio hace la
+// reserva (precio, duración, zona horaria, catálogo), así que no hace falta
+// parámetro de configuración.
 'use strict';
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;

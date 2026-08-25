@@ -12,6 +12,10 @@
 // autogestión/etapa B, fuera de alcance en las etapas 0 y A (ver CLAUDE.md).
 // Solo centraliza el valor por defecto y la lista de estados reconocidos
 // para que los dos sitios de escritura no repitan el string suelto.
+//
+// Agnóstico de tenant: el ciclo de vida de una reserva (qué estados existen,
+// cuál es el default) no depende de qué negocio la creó -- no hay parámetro
+// de configuración porque no hay nada configurable por negocio acá.
 'use strict';
 
 const BOOKING_STATUSES = ['pending'];
