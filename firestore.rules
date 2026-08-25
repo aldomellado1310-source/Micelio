@@ -38,17 +38,26 @@ service cloud.firestore {
     // baja al navegador, así que nadie puede "sincronizar" desde el cliente.
     match /googleReviews/{id} { allow read: if true; allow write: if isAdmin(); }
 
-    // Reservas: solo admin lee/crea/edita/borra. La creación pública ya NO
-    // pasa por acá -- el widget (public/index.html) llama al callable
+    // Reservas: solo admin lee/crea/edita. La creación pública ya NO pasa
+    // por acá -- el widget (public/index.html) llama al callable
     // transaccional `createBooking` (functions/createBooking.js, Admin SDK,
     // no sujeto a estas reglas), que además verifica disponibilidad real
     // antes de escribir (algo que una regla no puede hacer: no puede
     // consultar otras colecciones, solo get()/exists() sobre rutas
     // concretas). Antes de esta fase, cualquiera podía crear una reserva
     // directo sin que NADA verificara solape de horario.
+    //
+    // delete: if false SIEMPRE (Etapa A, goal 13 del pool ReservaGo) --
+    // cancelar una reserva es un cambio de estado (status:'cancelled', vía
+    // el callable setBookingStatus), nunca un borrado. Antes de este goal,
+    // el panel borraba el documento entero al cancelar (deleteBooking) --
+    // ver CLAUDE.md, "Estado conocido". Mismo criterio ya aplicado a
+    // tenants/{tenantId} en el goal 8: la regla lo hace estructuralmente
+    // imposible, no solo por convención del panel.
     match /bookings/{id} {
-      allow read, update, delete: if isAdmin();
+      allow read, update: if isAdmin();
       allow create: if isAdmin() && isValidEmail(request.resource.data.get('email', ''));
+      allow delete: if false;
     }
     // El email es opcional (un barbero puede agendar por teléfono sin
     // correo): si viene vacío se acepta, pero si trae contenido debe tener
@@ -104,6 +113,21 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.platformRole == 'superadmin';
     }
 
+    // stamped(): exige que todo write autenticado deje registrado QUIÉN y
+    // CUÁNDO -- Firestore no le entrega esa identidad a un trigger de
+    // ninguna otra forma (event.data solo trae el documento). El trigger
+    // onTenantWritten (functions/index.js, goal 8) lee updatedBy del
+    // documento para atribuir cada fila de platformAuditLog al superadmin
+    // real que hizo el cambio. Sin esta regla, cualquiera podría escribir
+    // updatedBy con el uid de otra persona y la bitácora mentiría sobre
+    // quién hizo qué -- el mismo problema que el goal 15 va a resolver para
+    // auditLog de negocio, adelantado acá porque platformAuditLog lo
+    // necesita ya.
+    function stamped() {
+      return request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time;
+    }
+
     // ══ TENENCIA (Etapa T, goal 5 del pool ReservaGo) ══
     // tenants/{tenantId}: modelo de cliente de la plataforma -- SÍ tiene PII
     // (contactEmail, contactName). Antes del goal 7 esto era `if false` (ni
@@ -112,7 +136,29 @@ service cloud.firestore {
     // White (pasará a ser 'owner' de SU tenant en el goal 14) y a propósito
     // NO es el gate acá -- confundiría "dueño de un negocio" con "opera la
     // plataforma completa".
-    match /tenants/{tenantId} { allow read, write: if isSuperadmin(); }
+    //
+    // Goal 8: create/update exigen stamped() (ver arriba). delete es
+    // SIEMPRE false, ni para un superadmin -- "nunca borrar un tenant: es un
+    // status, igual que un servicio retirado" (goal 8). A diferencia de
+    // services/staff (donde esa regla es solo convención de producto, sin
+    // gate en firestore.rules), acá sí se hace cumplir en la regla: perder
+    // el registro completo de un cliente de pago es categóricamente peor que
+    // perder un servicio del catálogo.
+    match /tenants/{tenantId} {
+      allow read: if isSuperadmin();
+      allow create, update: if isSuperadmin() && stamped();
+      allow delete: if false;
+    }
+
+    // platformAuditLog/{id}: altas, suspensiones y reactivaciones de tenants
+    // (goal 8). Escrito SOLO por el trigger onTenantWritten (Admin SDK, no
+    // sujeto a estas reglas) -- igual que adminLog/auditLog, ningún cliente
+    // escribe acá directo, para que la bitácora no dependa de que el panel
+    // "se acuerde" de loguear (ver el bug ya conocido de adminLog en
+    // CLAUDE.md). Lectura solo superadmin -- es información de plataforma
+    // (qué clientes existen, quién los dio de alta), no de un tenant
+    // individual.
+    match /platformAuditLog/{id} { allow read: if isSuperadmin(); allow write: if false; }
 
     // tenantsByDomain/{dominio} -> {tenantId, slug}: documento público SIN
     // PII para que el cliente resuelva su propio tenant al cargar. La
@@ -147,9 +193,31 @@ service cloud.firestore {
     // hoy (proyecto GCP `scissor-white`, separado a propósito del proyecto
     // de la plataforma -- ver README.md#Contexto:-Micelio). El corte real de
     // esas colecciones a esta ruta es el goal 17 (migración), no este.
+    //
+    // Goal 8: un tenant 'suspended' bloquea la ESCRITURA de sus propios
+    // usuarios de negocio de inmediato -- isTenantSuspended() hace un get()
+    // extra a tenants/{tenantId} (única forma de que una regla vea otro
+    // documento). A propósito NO se bloquea la LECTURA: el goal exige que
+    // suspender "no borre ni oculte" los datos del tenant, así que su equipo
+    // sigue pudiendo ver su propio historial mientras está suspendido, solo
+    // no puede seguir operando.
+    function isTenantSuspended(tenantId) {
+      let tenantPath = /databases/$(database)/documents/tenants/$(tenantId);
+      // exists() primero: get().data en un documento inexistente es un error
+      // de evaluación (deniega toda la regla), no `null` -- y los tests del
+      // goal 6 ejercitan el aislamiento con claims sintéticos SIN sembrar un
+      // tenants/{tenantId} real. Un tenant sin documento (o sin `status`
+      // todavía) se trata como NO suspendido -- fail open acá, fail closed
+      // ya lo garantiza el chequeo de tenantId de la regla de abajo.
+      return exists(tenantPath) && get(tenantPath).data.status == 'suspended';
+    }
     match /tenants/{tenantId}/{collection}/{docId} {
-      allow read, write: if collection in ['resources', 'services', 'bookings', 'holds', 'auditLog', 'dataRequests']
-        && request.auth != null && request.auth.token.tenantId == tenantId;
+      function inTenantCollections() {
+        return collection in ['resources', 'services', 'bookings', 'holds', 'auditLog', 'dataRequests']
+          && request.auth != null && request.auth.token.tenantId == tenantId;
+      }
+      allow read: if inTenantCollections();
+      allow write: if inTenantCollections() && !isTenantSuspended(tenantId);
     }
   }
 }

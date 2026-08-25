@@ -6,7 +6,7 @@
 // escribir tenants/{tenantId} (el modelo de cliente de la plataforma).
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { beforeAll, afterAll, test } from 'vitest';
 
 let env;
@@ -21,7 +21,12 @@ afterAll(async () => { await env.cleanup(); });
 
 test('superadmin puede leer y escribir tenants/{tenantId}', async () => {
   const db = env.authenticatedContext('super-uid', { platformRole: 'superadmin' }).firestore();
-  await assertSucceeds(setDoc(doc(db, 'tenants/ten_scissorwhite'), { name: 'Scissor White', status: 'active' }));
+  // stamped() (goal 8) exige updatedBy/updatedAt desde este goal en
+  // adelante -- ver tests/rules/tenant-lifecycle.rules.test.js para la
+  // cobertura dedicada de esa regla.
+  await assertSucceeds(setDoc(doc(db, 'tenants/ten_scissorwhite'), {
+    name: 'Scissor White', status: 'active', updatedBy: 'super-uid', updatedAt: serverTimestamp(),
+  }));
   await assertSucceeds(getDoc(doc(db, 'tenants/ten_scissorwhite')));
 });
 

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { beforeAll, afterAll, test } from 'vitest';
 
 let env;
@@ -125,6 +125,18 @@ test('admin SÍ puede crear una reserva sin email (opcional en el panel)', async
 test('admin SÍ puede crear una reserva con email válido', async () => {
   const db = env.authenticatedContext('admin1', { admin: true }).firestore();
   await assertSucceeds(setDoc(doc(db, 'bookings/adm3'), { code: 'SW-ADM3', name: 'Cliente', email: 'cliente@test.cl' }));
+});
+
+// Etapa A, goal 13 del pool ReservaGo: cancelar es un cambio de estado
+// (callable setBookingStatus), nunca un borrado -- ni siquiera un admin
+// puede borrar el documento directo. Antes de este goal, deleteBooking
+// hacía exactamente eso.
+test('ni un admin puede borrar una reserva -- cancelar es un cambio de estado, no un borrado', async () => {
+  const db = env.authenticatedContext('admin1', { admin: true }).firestore();
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'bookings/adm4'), { code: 'SW-ADM4', name: 'Cliente', status: 'pending' });
+  });
+  await assertFails(deleteDoc(doc(db, 'bookings/adm4')));
 });
 
 // ── Reseñas de Google ──

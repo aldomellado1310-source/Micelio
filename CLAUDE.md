@@ -51,14 +51,15 @@ Estado conocido, a verificar antes de tocar nada:
   CEL muerta (documentación) y isValidEmail() como el único gate real del camino
   de escritura directa del admin — esa brecha sigue sin cerrar.
   Estado: functions/shared/status.js centraliza DEFAULT_BOOKING_STATUS
-  ('pending'), pero sigue sin existir ninguna transición de estado en el repo.
+  ('pending') y, desde los goals 12/13 (Etapa A, ver más abajo), las
+  transiciones válidas y el callable setBookingStatus que las aplica sobre
+  Scissor White de verdad.
 - isAdmin() es custom claim admin:true O UN UID ESCRITO A MANO, repetido en cuatro
   archivos: firestore.rules, storage.rules (x2), functions/index.js.
-- buildBookingDoc() escribe status:'pending' fijo y nada lo cambia jamás.
-- deleteBooking() hace deleteDoc: cancelar destruye el registro.
+- buildBookingDoc() sigue escribiendo status:'pending' fijo al crear -- eso no
+  cambió (el goal 13 solo tocó cómo se sale de 'pending', no cómo se entra).
 - log() escribe en memoria; saveAdmin() solo persiste services, staff y businessInfo.
   adminLog nunca se escribe desde el panel.
-- computeAvailability no filtra por status.
 - Tenencia (Etapa T, goal 5 del pool ReservaGo -- arranca, no está completa):
   existen `tenants/{tenantId}` (PII: name, slug, domain, status, plan,
   contactEmail, contactName, timezone, createdAt, createdBy) y
@@ -114,6 +115,171 @@ Estado conocido, a verificar antes de tocar nada:
   Probado que un superadmin puro NO puede leer/escribir ni las colecciones de
   nivel raíz de Scissor White ni ninguna subcolección de tenant (goal 6) --
   tests/rules/platform-role.rules.test.js, 5 tests contra el emulador real.
+  Goal 8: existe `public/superadmin/index.html` -- panel de PLATAFORMA
+  separado de `public/admin/index.html` (panel de negocio), solo accesible
+  con `isSuperadmin()`. Opera contra `registrago001` vía
+  `public/js/firebase-init-platform.js` -- CONFIG PENDIENTE: son placeholders,
+  no hay ninguna app web real registrada en `registrago001` todavía, hay que
+  reemplazarlos (ver el comentario de cabecera de ese archivo) antes de que
+  el panel funcione de verdad. `public/js/platform-auth.js`/`platform-data.js`
+  son los equivalentes de auth.js/data.js para este panel -- mismo patrón,
+  nunca comparten Firebase app con el panel de negocio. Alta/suspensión/
+  reactivación son escrituras DIRECTAS a `tenants/{tenantId}` (mismo criterio
+  que el admin panel usa para services/staff, sin callable) protegidas por
+  `stamped()` en firestore.rules (exige `updatedBy == request.auth.uid` y
+  `updatedAt == request.time` en cada create/update) -- sin esto,
+  `platformAuditLog` no podría atribuir un cambio al superadmin real que lo
+  hizo, porque Firestore no le entrega esa identidad a un trigger de ninguna
+  otra forma. Mismo problema que el goal 15 va a resolver para auditLog de
+  negocio, adelantado acá porque platformAuditLog lo necesita ya. Un tenant
+  NUNCA se borra -- ni un superadmin puede (`allow delete: if false`, más
+  estricto que services/staff, donde eso es solo convención sin gate en la
+  regla). Suspender bloquea la ESCRITURA de las subcolecciones del tenant
+  (goal 6) de inmediato vía `isTenantSuspended()` (un `get()` a
+  `tenants/{tenantId}` desde la regla) pero NO la lectura -- "no borra ni
+  oculta sus datos" es literal. Decisión de producto pedida por el goal (widget
+  público de un tenant suspendido): apagarlo por completo perdería el invariante "nada se
+  oculta"; la forma más simple es que, cuando el widget público se vuelva
+  tenant-aware (goal 9+), `tenantsByDomain/{dominio}` (ya público, sin PII)
+  refleje también `status` -- mantenido por el mismo trigger onTenantWritten
+  el día que haya un dominio real que sincronizar (hoy ningún tenant tiene
+  domain asignado, así que no hay nada que sincronizar todavía) -- y el
+  widget, si ve `status:'suspended'`, muestra un aviso estático en vez del
+  flujo de reserva, sin dejar de mostrar el resto del sitio. No implementado
+  todavía -- es una decisión de diseño registrada, el widget público sigue
+  sin ser tenant-aware.
+  `functions/index.js#onTenantWritten` (trigger) + `functions/platformAuditLog.js`
+  (lógica pura) mantienen `platformAuditLog/{id}` -- solo lectura para
+  superadmin, escritura solo Admin SDK. Verificación completa: sin acceso a
+  gstatic.com en este entorno (403 del proxy de egress, confirmado, no es
+  un bug a rodear) no se pudo cargar el panel en un navegador real contra
+  Firebase de verdad -- se verificó la lógica de UI completa (login,
+  credenciales inválidas, alta/suspensión/reactivación/logout, y el camino
+  de acceso denegado) con jsdom mockeando PlatformAuth/PlatformData, y el
+  aislamiento de datos con el emulador real de reglas
+  (tests/rules/tenant-lifecycle.rules.test.js, 9 tests). Sigue pendiente una
+  prueba real en navegador contra Firebase, igual que goals 2/3.
+  Etapa A -- modelo de datos de negocio dentro de un tenant (arranca en el goal 9,
+  ya sobre el esquema con tenantId del goal 6; no hay una versión sin tenant que
+  migrar después):
+  Goal 9: `functions/shared/resource.js` define el modelo de `resource`
+  (reemplaza "el recurso es el barbero" -- puede ser `kind:'person'`,
+  `'space'` o `'equipment'`), agnóstico de tenant igual que el resto de
+  `shared/`. `schedule[0..6]` reusa DELIBERADAMENTE el mismo shape que ya
+  usa `staff.schedule` en Scissor White hoy (`{open,start,end,break:{start,end}}`,
+  ver `computeAvailability` en `functions/shared/availability.js`) -- no se
+  inventa un formato nuevo, para que la migración staff -> resources del
+  goal 17 no tenga que transformar este campo. `profile{photo,bio}` es
+  EXCLUSIVO de `kind:'person'` -- `isValidResourcePayload()` rechaza un
+  `space`/`equipment` que traiga `profile`. Vive únicamente en
+  `tenants/{tenantId}/resources/{id}` (subcolección del goal 6, que ya
+  cubre el aislamiento tenant-vs-tenant estructuralmente) -- no existe ni
+  debe crearse una colección `resources` de nivel raíz;
+  `tests/rules/resource.rules.test.js` prueba contra el emulador tanto la
+  forma real del documento (person con profile, space sin profile) como que
+  una ruta `/resources/{id}` sin tenantId cae por deny-all implícito, no
+  por convención. Todavía SIN callable de escritura (create/update de un
+  resource sigue siendo, por ahora, fuera de alcance de este goal) ni
+  wiring en ningún panel HTML -- goal 9 solo entrega el modelo de datos y
+  su validación; conectarlo a un panel de negocio multi-tenant real es
+  trabajo de goals posteriores (y del goal 17 para Scissor White en
+  particular).
+  Goal 10: `functions/shared/service.js` define `requires:
+  [{kind,anyOf,count}]` de un servicio -- una cita puede necesitar varios
+  recursos a la vez (una persona Y un box). `normalizeServiceRequires()` es
+  la ÚNICA función que debe leer `service.requires`: un servicio sin
+  requires (o con `requires` vacío) devuelve siempre `DEFAULT_REQUIRES`
+  (`[{kind:'person', anyOf:null, count:1}]`) -- el REQUISITO DURO del goal,
+  formalizado como dato en vez de dejarlo implícito en cómo agrupaba
+  computeAvailability(). `functions/shared/availability.js` gana
+  `computeResourceAvailability()`/`isServiceBookableAt()`, la generalización
+  tenant-aware de `computeAvailability()`/`isRangeFree()` -- agrupa
+  ocupación por `resourceIds[]` de la reserva (no por un único `barberId`) y
+  exige que CADA requerimiento tenga suficientes recursos libres del kind
+  correcto. Coexiste con `computeAvailability()`: Scissor White sigue usando
+  staff/barberId hasta la migración del goal 17. `bookings.resourceIds[]`
+  usado acá es el campo que el goal 11 recién va a agregar a los documentos
+  reales -- este goal solo lo consume como forma de parámetro puro, no
+  escribe ningún booking todavía. `functions/test/service.crosscheck.test.js`
+  prueba el REQUISITO DURO contra una captura real de
+  computeAvailability()/isRangeFree() para una jornada completa (múltiples
+  barberos, reservas, colación y un bloqueo): el motor nuevo con el
+  requires por defecto debe producir el mismo booleano "agendable" que el
+  motor viejo en CADA slot de 15 minutos del día -- probado a propósito con
+  un bug deliberado (ignorar bufferMin), revertido antes de commitear, igual
+  criterio que crosscheck.solape.test.js del goal 3. Sin callable ni wiring
+  en ningún panel todavía -- mismo alcance que el goal 9.
+  Goal 11: `functions/shared/booking.js#buildBookingLifecycleFields()`
+  inicializa los campos de ciclo de vida de una reserva tenant-aware:
+  status/statusAt/statusReason/statusHistory[] (acotado a
+  STATUS_HISTORY_MAX=20 vía `appendStatusHistory()`, descarta las entradas
+  MÁS VIEJAS), resourceIds[], remindAt, reminderSentAt, manageTokenV,
+  modifiedCount, updatedBy, updatedAt. `resourceIds[]` es la fuente de
+  verdad (goal 9/10); `barberId` queda DEPRECADO y se sincroniza como espejo
+  de `resourceIds[0]` SOLO mientras el widget viejo de Scissor White (que
+  hoy lee/escribe `barberId` directo) siga en circulación -- se retira en el
+  goal 17, ningún código nuevo debe leerlo para decidir nada.
+  `remindAt`/`reminderSentAt`/`manageTokenV`/`modifiedCount` se crean ahora
+  con un valor placeholder (null/0) pero nada los interpreta todavía -- son
+  para la etapa C (recordatorios, autogestión), fuera de alcance de las
+  etapas 0/T/A. `actor` (uid de quien crea la reserva) es `null` para el
+  flujo público sin autenticar (mismo caso que `createBooking` hoy, Admin
+  SDK sin `request.auth`) -- un actor real llega recién con las
+  transiciones de estado del goal 12/13. Sin callable ni wiring en ningún
+  panel todavía, ni cambios a `functions/createBooking.js` (Scissor White
+  sigue con `status:'pending'` fijo y `deleteBooking` hasta el goal 13) --
+  mismo alcance que goals 9/10.
+  Goals 12+13 (fusionados -- ver más abajo por qué): `functions/shared/status.js`
+  es ahora la ÚNICA autoridad sobre transiciones: `pending -> confirmed|
+  cancelled|no_show`, `confirmed -> completed|cancelled|no_show`,
+  `completed`/`cancelled`/`no_show` terminales. `validateStatusTransition()`
+  rechaza cada motivo con un código/mensaje ESPECÍFICO (estado actual
+  desconocido, estado destino desconocido, estado actual terminal,
+  transición no declarada) -- nunca un "transición inválida" genérico, tal
+  como lo pide el goal 12. `occupiesSlot()` (solo `cancelled`/`no_show`
+  liberan cupo; cualquier status ausente o desconocido cuenta como que
+  OCUPA, a propósito conservador) ahora vive DENTRO de
+  `computeAvailability()`/`computeResourceAvailability()`
+  (`functions/shared/availability.js`) -- una sola fuente, ningún call site
+  tuvo que cambiar (`getAvailability`, `recomputeAvailabilityForDate`,
+  `createBooking` heredan el filtro gratis).
+
+  DECISIÓN DE ALCANCE (consultada y confirmada por Aldo, dos preguntas
+  seguidas): el goal 12 pedía explícitamente que el módulo lo consumieran
+  "tanto functions/ como el panel de negocio", pero hoy NO existe ningún
+  flujo real de cambio de estado -- el panel solo borraba la cita
+  (deleteBooking), que es literalmente lo que el goal 13 (siguiente) viene a
+  resolver. Fusionar 12+13 en un solo paso era la única forma de consumir el
+  módulo de verdad en ambas superficies sin código especulativo. Y dentro de
+  13: su callable `setBookingStatus(tenantId resuelto en servidor, bookingId,
+  status, reason)` tal como está escrito en el pool asume que YA existe un
+  tenant real para el negocio que lo llama -- pero Scissor White sigue sin
+  tenant real (eso es el goal de cierre 17), así que resolver tenantId por
+  dominio haría fallar el callable siempre. Se decidió corregir el bug real
+  y ya documentado de Scissor White ahora: `functions/setBookingStatus.js`
+  (lógica pura, mismo patrón que `createBooking.js`) opera sobre la
+  colección RAÍZ `bookings`, SIN resolver tenantId. El motor puro
+  (`resolveSetBookingStatus`) no conoce la ruta del documento -- el goal 17
+  podrá apuntar este mismo callable a `tenants/{tenantId}/bookings` sin
+  reescribirlo, cuando ese tenant exista de verdad.
+
+  `functions/setBookingStatus.js#resolveSetBookingStatus()` tolera reservas
+  viejas sin `statusHistory`/`modifiedCount` (el 100% de las reservas de
+  Scissor White de antes del goal 11): `appendStatusHistory()` ya trataba
+  `undefined` como historial vacío. La primera vez que una reserva vieja
+  cambia de estado "adquiere" los campos de ciclo de vida del goal 11 sin
+  necesitar una migración aparte. `firestore.rules`: `bookings/{id}` pierde
+  `delete` (`allow delete: if false` SIEMPRE, mismo criterio que
+  `tenants/{tenantId}` del goal 8) -- ya no basta con que el panel deje de
+  llamar `deleteDoc`, la regla lo hace estructuralmente imposible.
+  `public/admin/index.html`: el botón "Eliminar cita" (modal y lista) pasó a
+  "Cancelar cita"/"Cancelar", llama a `setBookingStatus(id,'cancelled',
+  reason)` con un motivo capturado vía `window.prompt()` (sin agregar
+  ningún campo nuevo al modal, para no reestructurar el HTML) en vez de
+  borrar el documento. `checkConflict()` ahora filtra con
+  `SWCore.occupiesSlot(b.status)` -- sin esto, una cita cancelada seguiría
+  bloqueando su horario en el propio chequeo de conflictos del panel,
+  aunque el servidor ya la considerara libre.
 - Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
   desplegar (ya no ocho nombres a mano en README.md).
   `functions/scripts/printDeployTargets.js` arma el `--only` de

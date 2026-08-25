@@ -89,10 +89,17 @@ async function saveBooking(b) {
   return id;
 }
 
-// Borra UNA reserva por su ID real (no por `code`: una reserva creada por el
-// widget público tiene un autoId de Firestore distinto de su `code`).
-async function deleteBooking(id) {
-  await deleteDoc(doc(db, 'bookings', id));
+// Cambia el status de UNA reserva por su ID real (no por `code`: una reserva
+// creada por el widget público tiene un autoId de Firestore distinto de su
+// `code`), vía el callable transaccional setBookingStatus (Etapa A, goal 13
+// del pool ReservaGo) -- reemplaza el deleteDoc directo de antes (cancelar
+// ya NO destruye el registro, ver CLAUDE.md "Estado conocido"). El servidor
+// valida la transición (functions/shared/status.js#validateStatusTransition)
+// y rechaza con un HttpsError específico si no es válida -- firestore.rules
+// ya no permite borrar `bookings` en absoluto (allow delete: if false).
+async function setBookingStatus(id, status, reason) {
+  const call = httpsCallable(functions, 'setBookingStatus');
+  await call({ bookingId: id, status, reason: reason || null });
 }
 
 // Suscripción en tiempo real a `bookings` para el panel admin (permitido por
@@ -297,7 +304,7 @@ async function syncGoogleReviews(force = false) {
 }
 
 window.SWData = {
-  loadAdmin, saveAdmin, loadCatalog, getBookings, saveBooking, deleteBooking, subscribeBookings, createBooking,
+  loadAdmin, saveAdmin, loadCatalog, getBookings, saveBooking, setBookingStatus, subscribeBookings, createBooking,
   getPatients, savePatients, deletePatient,
   uploadPatientPhoto, deletePatientPhoto, getClubStatus, getAvailability, subscribeAvailability,
   loadSiteImages, saveSiteImage, deleteSiteImage,
@@ -305,7 +312,7 @@ window.SWData = {
   loadGoogleReviews, saveManualReviews, syncGoogleReviews,
 };
 export {
-  loadAdmin, saveAdmin, loadCatalog, getBookings, saveBooking, deleteBooking, subscribeBookings, createBooking,
+  loadAdmin, saveAdmin, loadCatalog, getBookings, saveBooking, setBookingStatus, subscribeBookings, createBooking,
   getPatients, savePatients, deletePatient,
   uploadPatientPhoto, deletePatientPhoto, getClubStatus, getAvailability, subscribeAvailability,
   loadSiteImages, saveSiteImage, deleteSiteImage,

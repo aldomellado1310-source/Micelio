@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   toMinutes, addMinutesToTime, computeAvailability, dateKeyOf, dayBoundsOf,
-  overlaps, isRangeFree, isWithinOpenHours,
+  overlaps, isRangeFree, isWithinOpenHours, computeResourceAvailability,
 } = require('../shared/availability.js');
 
 test('toMinutes convierte HH:MM a minutos desde medianoche', () => {
@@ -48,6 +48,28 @@ test('computeAvailability con barberId "any" agrupa todas las reservas del día 
   ]);
   assert.deepStrictEqual(result.barberBusy.victoria, [{ start: '11:00', end: '11:30', kind: 'booking' }]);
   assert.deepStrictEqual(result.activeBarberIds.sort(), ['felipe', 'victoria']);
+});
+
+test('computeAvailability ignora reservas cancelled/no_show -- ya no ocupan cupo (goal 13)', () => {
+  const bookings = [
+    { barberId: 'felipe', date: '2026-07-10', time: '10:00', dur: 50, status: 'pending' },
+    { barberId: 'felipe', date: '2026-07-10', time: '12:00', dur: 30, status: 'cancelled' },
+    { barberId: 'felipe', date: '2026-07-10', time: '14:00', dur: 30, status: 'no_show' },
+    { barberId: 'felipe', date: '2026-07-10', time: '16:00', dur: 30, status: 'completed' },
+  ];
+  const staff = [{ id: 'felipe', status: 'active' }];
+  const result = computeAvailability({ bookings, staff, barberId: 'any' });
+  assert.deepStrictEqual(result.barberBusy.felipe, [
+    { start: '10:00', end: '10:50', kind: 'booking' },
+    { start: '16:00', end: '16:30', kind: 'booking' },
+  ]);
+});
+
+test('computeAvailability trata una reserva sin status como que SÍ ocupa (conservador, igual que antes del goal 13)', () => {
+  const bookings = [{ barberId: 'felipe', date: '2026-07-10', time: '10:00', dur: 50 }];
+  const staff = [{ id: 'felipe', status: 'active' }];
+  const result = computeAvailability({ bookings, staff, barberId: 'any' });
+  assert.deepStrictEqual(result.barberBusy.felipe, [{ start: '10:00', end: '10:50', kind: 'booking' }]);
 });
 
 test('computeAvailability trata barberId vacío/omitido igual que "any"', () => {
@@ -264,4 +286,15 @@ test('isWithinOpenHours: dentro, fuera, día cerrado y sin schedule', () => {
   assert.strictEqual(isWithinOpenHours(schedule, 2, '19:30', '20:30'), false); // se pasa del cierre
   assert.strictEqual(isWithinOpenHours(schedule, 0, '10:00', '10:50'), false); // día sin entrada (cerrado)
   assert.strictEqual(isWithinOpenHours(null, 2, '10:00', '10:50'), false);
+});
+
+test('computeResourceAvailability ignora reservas cancelled/no_show, igual que computeAvailability (goal 13)', () => {
+  const resources = [{ id: 'res_ana', kind: 'person', active: true }];
+  const bookings = [
+    { resourceIds: ['res_ana'], time: '10:00', dur: 50, status: 'pending' },
+    { resourceIds: ['res_ana'], time: '12:00', dur: 30, status: 'cancelled' },
+    { resourceIds: ['res_ana'], time: '14:00', dur: 30, status: 'no_show' },
+  ];
+  const result = computeResourceAvailability({ bookings, resources });
+  assert.deepStrictEqual(result.resourceBusy.res_ana, [{ start: '10:00', end: '10:50', kind: 'booking' }]);
 });

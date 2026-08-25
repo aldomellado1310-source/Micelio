@@ -1229,7 +1229,7 @@ html,body{height:100%;font-family:'Inter',sans-serif}
       <div id="a-bkm-conflict" class="a-conflict"></div>
     </div>
     <div class="a-mf">
-      <button class="a-btn a-btn-danger" id="a-bkm-del" style="margin-right:auto;display:none">Eliminar cita</button>
+      <button class="a-btn a-btn-danger" id="a-bkm-del" style="margin-right:auto;display:none">Cancelar cita</button>
       <button class="a-btn a-btn-g" data-close="a-bkm">Cancelar</button>
       <button class="a-btn a-btn-p" id="a-bkm-save">Guardar cita</button>
     </div>
@@ -1615,7 +1615,7 @@ function renderDash(){
 function getBk(){ return BK; }
 
 // Escritura: persiste en Firestore. Puntual por documento -- ya no lee/reescribe
-// la colección completa (ver public/js/data.js#saveBooking/deleteBooking).
+// la colección completa (ver public/js/data.js#saveBooking/setBookingStatus).
 // NO reasigna BK ni llama updateBadges() acá -- la suscripción en tiempo real
 // es la única fuente de verdad para BK, y su callback (renderBookingsViews)
 // ya se encarga de eso cuando Firestore confirma el cambio.
@@ -1626,8 +1626,13 @@ function getBk(){ return BK; }
 function setBk(b){
   return window.SWData.saveBooking(b);
 }
-function delBk(id){
-  return window.SWData.deleteBooking(id);
+// Etapa A, goal 13 del pool ReservaGo: cancelar es un cambio de estado
+// (callable transaccional setBookingStatus), nunca un deleteDoc -- la
+// reserva sigue existiendo con status:'cancelled', motivo y autor. Antes de
+// este goal acá vivía delBk()/deleteBookingLocal()/deleteBookingAnd(), que
+// borraban el documento entero.
+function setStatusBk(id, status, reason){
+  return window.SWData.setBookingStatus(id, status, reason);
 }
 
 function getBookings(){
@@ -1638,14 +1643,15 @@ function saveBooking(b){
   updatePatBadge();
   return guardado;
 }
-function deleteBookingLocal(id){
-  var borrado = delBk(id);
-  updatePatBadge();
-  return borrado;
+function cancelBookingLocal(id, reason){
+  // updatePatBadge() no aplica acá (a diferencia de saveBooking/antes
+  // deleteBookingLocal): cancelar no cambia cuántas visitas confirmadas
+  // tiene un cliente en el club, así que no hay badge que recalcular.
+  return setStatusBk(id, 'cancelled', reason);
 }
 
 // Guarda y avisa del resultado real. Todo el que mute una reserva debe usar
-// esto o deleteBookingAnd() en vez de saveBooking()/deleteBookingLocal() +
+// esto o cancelBookingAnd() en vez de saveBooking()/cancelBookingLocal() +
 // showAlert('ok') a ciegas.
 function saveBookingAnd(b, okMsg){
   return saveBooking(b).then(function(){
@@ -1655,12 +1661,12 @@ function saveBookingAnd(b, okMsg){
     showAlert('a-bk-alert', 'err', 'No se pudo guardar: ' + ((e && e.code) || 'error desconocido') + '. La cita NO quedó registrada.');
   });
 }
-function deleteBookingAnd(id, okMsg){
-  return deleteBookingLocal(id).then(function(){
+function cancelBookingAnd(id, reason, okMsg){
+  return cancelBookingLocal(id, reason).then(function(){
     showAlert('a-bk-alert', 'ok', okMsg);
   }).catch(function(e){
-    console.error('Error eliminando reserva', e);
-    showAlert('a-bk-alert', 'err', 'No se pudo eliminar: ' + ((e && e.code) || 'error desconocido') + '.');
+    console.error('Error cancelando reserva', e);
+    showAlert('a-bk-alert', 'err', 'No se pudo cancelar: ' + ((e && e.message) || (e && e.code) || 'error desconocido') + '.');
   });
 }
 
@@ -1724,6 +1730,12 @@ function checkConflict(barberId, dateStr, timeStr, durMin, ignoreId, bufferMin){
     if(ignoreId && b.code === ignoreId) continue;
     if(b.barberId !== barberId) continue;
     if((b.date ? b.date.substring(0,10) : '') !== dateStr) continue;
+    // Una reserva 'cancelled'/'no_show' ya no ocupa su horario (Etapa A,
+    // goal 13 del pool ReservaGo) -- SWCore.occupiesSlot() es la MISMA
+    // función que usa computeAvailability() en el servidor
+    // (functions/shared/status.js), para que el panel no vuelva a marcar
+    // como "conflicto" un horario que una cancelación ya liberó.
+    if(!SWCore.occupiesSlot(b.status)) continue;
     var bStart = toMin(b.time);
     var bEnd = bStart + (b.dur||30);
     if(SWCore.overlaps(candStart, candEnd, bStart, bEnd, bufferMin)){
@@ -1896,7 +1908,7 @@ function renderBookingList(){
       '<td data-label="Precio">'+fmtCLP(b.price)+'</td>' +
       '<td><div class="a-tacts">' +
         '<button class="a-btn a-btn-g" data-lst-edit="'+esc(b.code)+'">✎<span class="a-bl">Editar</span></button>' +
-        '<button class="a-btn a-btn-danger" data-lst-del="'+esc(b.code)+'">✕<span class="a-bl">Eliminar</span></button>' +
+        '<button class="a-btn a-btn-danger" data-lst-cancel="'+esc(b.code)+'">✕<span class="a-bl">Cancelar</span></button>' +
       '</div></td>' +
     '</tr>';
   }).join('');
@@ -1914,14 +1926,15 @@ function renderBookingList(){
       if(bk) openBookingModal(bk);
     });
   });
-  body.querySelectorAll('[data-lst-del]').forEach(function(btn){
+  body.querySelectorAll('[data-lst-cancel]').forEach(function(btn){
     btn.addEventListener('click', function(){
-      var code = btn.dataset.lstDel;
-      openDel('¿Eliminar esta cita? Esta acción no se puede deshacer.', function(){
+      var code = btn.dataset.lstCancel;
+      openDel('¿Cancelar esta cita? Esta acción no se puede deshacer.', function(){
         var bk = getBookings().find(function(b){return b.code === code});
-        deleteBookingAnd(bk ? (bk.id || bk.code) : code, 'Cita eliminada.');
+        var reason = window.prompt('Motivo de la cancelación (opcional):', '') || null;
+        cancelBookingAnd(bk ? (bk.id || bk.code) : code, reason, 'Cita cancelada.');
         refreshBookingViews();
-        log('Eliminó cita', code);
+        log('Canceló cita', code);
       });
     });
   });
@@ -2386,11 +2399,12 @@ g('a-bkm-save').addEventListener('click', function(){
 g('a-bkm-del').addEventListener('click', function(){
   var code = g('a-bkm-id').value;
   if(!code) return;
-  openDel('¿Eliminar esta cita? Esta acción no se puede deshacer.', function(){
+  openDel('¿Cancelar esta cita? Esta acción no se puede deshacer.', function(){
     var bk = getBookings().find(function(b){return b.code === code});
-    deleteBookingAnd(bk ? (bk.id || bk.code) : code, 'Cita eliminada.');
+    var reason = window.prompt('Motivo de la cancelación (opcional):', '') || null;
+    cancelBookingAnd(bk ? (bk.id || bk.code) : code, reason, 'Cita cancelada.');
     closeModal('a-bkm');
-    log('Eliminó cita', code);
+    log('Canceló cita', code);
   });
 });
 

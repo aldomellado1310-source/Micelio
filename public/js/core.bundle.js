@@ -10,10 +10,64 @@ var SWCore = (() => {
     }
   };
 
+  // functions/shared/status.js
+  var require_status = __commonJS({
+    "functions/shared/status.js"(exports, module) {
+      "use strict";
+      var BOOKING_STATUSES = ["pending", "confirmed", "completed", "cancelled", "no_show"];
+      var DEFAULT_BOOKING_STATUS = "pending";
+      var TRANSITIONS = {
+        pending: ["confirmed", "cancelled", "no_show"],
+        confirmed: ["completed", "cancelled", "no_show"]
+      };
+      var OCCUPYING_STATUSES = ["pending", "confirmed", "completed"];
+      var NON_OCCUPYING_STATUSES = ["cancelled", "no_show"];
+      function isValidBookingStatus(status) {
+        return BOOKING_STATUSES.indexOf(status) !== -1;
+      }
+      function isTerminalStatus(status) {
+        return isValidBookingStatus(status) && !Object.prototype.hasOwnProperty.call(TRANSITIONS, status);
+      }
+      function getValidNextStatuses(status) {
+        return TRANSITIONS[status] ? TRANSITIONS[status].slice() : [];
+      }
+      function occupiesSlot(status) {
+        return NON_OCCUPYING_STATUSES.indexOf(status) === -1;
+      }
+      function validateStatusTransition(fromStatus, toStatus) {
+        if (!isValidBookingStatus(fromStatus)) {
+          return { ok: false, code: "failed-precondition", message: `Estado actual desconocido: "${fromStatus}".` };
+        }
+        if (!isValidBookingStatus(toStatus)) {
+          return { ok: false, code: "invalid-argument", message: `Estado destino desconocido: "${toStatus}".` };
+        }
+        if (isTerminalStatus(fromStatus)) {
+          return { ok: false, code: "failed-precondition", message: `La reserva ya est\xE1 en un estado terminal (${fromStatus}) y no admite m\xE1s cambios.` };
+        }
+        if (getValidNextStatuses(fromStatus).indexOf(toStatus) === -1) {
+          return { ok: false, code: "failed-precondition", message: `Transici\xF3n no permitida: ${fromStatus} -> ${toStatus}.` };
+        }
+        return { ok: true };
+      }
+      module.exports = {
+        BOOKING_STATUSES,
+        DEFAULT_BOOKING_STATUS,
+        TRANSITIONS,
+        OCCUPYING_STATUSES,
+        isValidBookingStatus,
+        isTerminalStatus,
+        getValidNextStatuses,
+        occupiesSlot,
+        validateStatusTransition
+      };
+    }
+  });
+
   // functions/shared/availability.js
   var require_availability = __commonJS({
     "functions/shared/availability.js"(exports, module) {
       "use strict";
+      var { occupiesSlot } = require_status();
       function toMinutes(hhmm) {
         const parts = String(hhmm || "0:0").split(":");
         const h = parseInt(parts[0], 10) || 0;
@@ -39,7 +93,8 @@ var SWCore = (() => {
       }
       function computeAvailability({ bookings, staff, barberId, dow, scheduleBlocks }) {
         const wantsAny = !barberId || barberId === "any";
-        const relevant = wantsAny ? bookings || [] : (bookings || []).filter((b) => b.barberId === barberId);
+        const occupying = (bookings || []).filter((b) => occupiesSlot(b.status));
+        const relevant = wantsAny ? occupying : occupying.filter((b) => b.barberId === barberId);
         const barberBusy = {};
         function addBusy(id, start, end, kind) {
           if (!id) return;
@@ -81,6 +136,40 @@ var SWCore = (() => {
         if (!day || !day.open) return false;
         return toMinutes(startHHMM) >= toMinutes(day.start) && toMinutes(endHHMM) <= toMinutes(day.end);
       }
+      function computeResourceAvailability({ bookings, resources, dow, scheduleBlocks }) {
+        const resourceBusy = {};
+        function addBusy(id, start, end, kind) {
+          if (!id) return;
+          if (!resourceBusy[id]) resourceBusy[id] = [];
+          resourceBusy[id].push({ start, end, kind });
+        }
+        (bookings || []).filter((b) => occupiesSlot(b.status)).forEach((b) => {
+          const end = addMinutesToTime(b.time, b.dur || 0);
+          (b.resourceIds || []).forEach((id) => addBusy(id, b.time, end, "booking"));
+        });
+        const activeResources = (resources || []).filter((r) => r.active);
+        if (typeof dow === "number") {
+          activeResources.forEach((r) => {
+            const day = Array.isArray(r.schedule) ? r.schedule[dow] : null;
+            if (day && day.break && day.break.start && day.break.end) {
+              addBusy(r.id, day.break.start, day.break.end, "break");
+            }
+          });
+        }
+        (scheduleBlocks || []).forEach((blk) => {
+          if (!blk.resourceId) return;
+          addBusy(blk.resourceId, blk.start, blk.end, "block");
+        });
+        return { resourceBusy, activeResources };
+      }
+      function isRequirementFreeAt(requirement, activeResources, resourceBusy, startHHMM, endHHMM, bufferMin = 0) {
+        const candidates = activeResources.filter((r) => r.kind === requirement.kind && (!requirement.anyOf || requirement.anyOf.indexOf(r.id) !== -1));
+        const freeCount = candidates.filter((r) => isRangeFree(resourceBusy[r.id] || [], startHHMM, endHHMM, bufferMin)).length;
+        return freeCount >= requirement.count;
+      }
+      function isServiceBookableAt(requires, activeResources, resourceBusy, startHHMM, endHHMM, bufferMin = 0) {
+        return (requires || []).every((req) => isRequirementFreeAt(req, activeResources, resourceBusy, startHHMM, endHHMM, bufferMin));
+      }
       module.exports = {
         toMinutes,
         toHHMM,
@@ -90,7 +179,10 @@ var SWCore = (() => {
         dayBoundsOf,
         overlaps,
         isRangeFree,
-        isWithinOpenHours
+        isWithinOpenHours,
+        computeResourceAvailability,
+        isRequirementFreeAt,
+        isServiceBookableAt
       };
     }
   });
@@ -171,16 +263,123 @@ var SWCore = (() => {
     }
   });
 
-  // functions/shared/status.js
-  var require_status = __commonJS({
-    "functions/shared/status.js"(exports, module) {
+  // functions/shared/resource.js
+  var require_resource = __commonJS({
+    "functions/shared/resource.js"(exports, module) {
       "use strict";
-      var BOOKING_STATUSES = ["pending"];
-      var DEFAULT_BOOKING_STATUS = "pending";
-      function isValidBookingStatus(status) {
-        return BOOKING_STATUSES.indexOf(status) !== -1;
+      var RESOURCE_KINDS = ["person", "space", "equipment"];
+      var DAYS_PER_WEEK = 7;
+      var HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+      function isValidHHMM(v) {
+        return typeof v === "string" && HHMM_RE.test(v);
       }
-      module.exports = { BOOKING_STATUSES, DEFAULT_BOOKING_STATUS, isValidBookingStatus };
+      function isValidScheduleBreak(brk) {
+        if (brk === void 0) return true;
+        return brk !== null && typeof brk === "object" && isValidHHMM(brk.start) && isValidHHMM(brk.end);
+      }
+      function isValidScheduleDay(day) {
+        if (!day || typeof day !== "object") return false;
+        if (typeof day.open !== "boolean") return false;
+        if (!day.open) return true;
+        return isValidHHMM(day.start) && isValidHHMM(day.end) && isValidScheduleBreak(day.break);
+      }
+      function isValidSchedule(schedule) {
+        return Array.isArray(schedule) && schedule.length === DAYS_PER_WEEK && schedule.every(isValidScheduleDay);
+      }
+      function isValidProfile(profile) {
+        if (profile === void 0) return true;
+        if (profile === null || typeof profile !== "object") return false;
+        if (profile.photo !== void 0 && typeof profile.photo !== "string") return false;
+        if (profile.bio !== void 0 && typeof profile.bio !== "string") return false;
+        return true;
+      }
+      function isValidResourcePayload(data) {
+        if (!data || typeof data !== "object") return false;
+        if (RESOURCE_KINDS.indexOf(data.kind) === -1) return false;
+        if (typeof data.name !== "string" || data.name.trim().length === 0) return false;
+        if (typeof data.active !== "boolean") return false;
+        if (!isValidSchedule(data.schedule)) return false;
+        if (data.kind === "person") {
+          if (!isValidProfile(data.profile)) return false;
+        } else if (data.profile !== void 0) {
+          return false;
+        }
+        return true;
+      }
+      module.exports = {
+        RESOURCE_KINDS,
+        DAYS_PER_WEEK,
+        isValidResourcePayload,
+        isValidSchedule,
+        isValidScheduleDay
+      };
+    }
+  });
+
+  // functions/shared/service.js
+  var require_service = __commonJS({
+    "functions/shared/service.js"(exports, module) {
+      "use strict";
+      var { RESOURCE_KINDS } = require_resource();
+      var DEFAULT_REQUIRES = [{ kind: "person", anyOf: null, count: 1 }];
+      function isValidRequirement(req) {
+        if (!req || typeof req !== "object") return false;
+        if (RESOURCE_KINDS.indexOf(req.kind) === -1) return false;
+        if (req.anyOf !== void 0 && req.anyOf !== null) {
+          if (!Array.isArray(req.anyOf) || req.anyOf.length === 0) return false;
+          if (!req.anyOf.every((id) => typeof id === "string" && id.length > 0)) return false;
+        }
+        if (!Number.isInteger(req.count) || req.count < 1) return false;
+        return true;
+      }
+      function isValidRequires(requires) {
+        if (requires === void 0 || requires === null) return true;
+        return Array.isArray(requires) && requires.length > 0 && requires.every(isValidRequirement);
+      }
+      function normalizeServiceRequires(service) {
+        const requires = service && service.requires;
+        if (!Array.isArray(requires) || requires.length === 0) return DEFAULT_REQUIRES;
+        return requires;
+      }
+      module.exports = { DEFAULT_REQUIRES, isValidRequirement, isValidRequires, normalizeServiceRequires };
+    }
+  });
+
+  // functions/shared/booking.js
+  var require_booking = __commonJS({
+    "functions/shared/booking.js"(exports, module) {
+      "use strict";
+      var { DEFAULT_BOOKING_STATUS } = require_status();
+      var STATUS_HISTORY_MAX = 20;
+      function appendStatusHistory(history, entry) {
+        const next = (Array.isArray(history) ? history : []).concat([entry]);
+        return next.length > STATUS_HISTORY_MAX ? next.slice(next.length - STATUS_HISTORY_MAX) : next;
+      }
+      function buildBookingLifecycleFields({ resourceIds, now, actor }) {
+        const ids = Array.isArray(resourceIds) ? resourceIds : [];
+        const nowIso = now.toISOString();
+        return {
+          status: DEFAULT_BOOKING_STATUS,
+          statusAt: nowIso,
+          statusReason: null,
+          statusHistory: appendStatusHistory([], {
+            status: DEFAULT_BOOKING_STATUS,
+            at: nowIso,
+            reason: null,
+            by: actor || null
+          }),
+          resourceIds: ids,
+          barberId: ids[0] || null,
+          // DEPRECADO -- ver comentario de cabecera.
+          remindAt: null,
+          reminderSentAt: null,
+          manageTokenV: 0,
+          modifiedCount: 0,
+          updatedBy: actor || null,
+          updatedAt: nowIso
+        };
+      }
+      module.exports = { STATUS_HISTORY_MAX, appendStatusHistory, buildBookingLifecycleFields };
     }
   });
 
@@ -192,7 +391,10 @@ var SWCore = (() => {
         require_availability(),
         require_timezone(),
         require_validate(),
-        require_status()
+        require_status(),
+        require_resource(),
+        require_service(),
+        require_booking()
       );
     }
   });
