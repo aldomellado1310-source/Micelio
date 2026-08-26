@@ -8,7 +8,7 @@
 // `resources` fuera de tenants/{tenantId}/....
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { beforeAll, afterAll, test } from 'vitest';
 import { isValidResourcePayload, DAYS_PER_WEEK } from '../../functions/shared/resource.js';
 
@@ -38,7 +38,11 @@ test('puedo crear un resource kind:person con profile dentro de un tenant de pru
 
   const db = env.authenticatedContext('owner-a', { tenantId: TENANT }).firestore();
   const ref = doc(db, `tenants/${TENANT}/resources/res_person`);
-  await assertSucceeds(setDoc(ref, data));
+  // updatedBy/updatedAt: firestore.rules#stamped() los exige desde el goal
+  // 15 en todo create/update dentro de un tenant -- no son parte del
+  // modelo de resource.js (que sigue validando la forma de negocio), los
+  // agrega la capa de escritura real (un futuro callable/panel).
+  await assertSucceeds(setDoc(ref, Object.assign({}, data, { updatedBy: 'owner-a', updatedAt: serverTimestamp() })));
   const snap = await getDoc(ref);
   const read = snap.data();
   if (read.kind !== 'person' || read.name !== 'Ana' || read.profile.bio !== 'Barbera') {
@@ -52,7 +56,7 @@ test('puedo crear un resource kind:space SIN profile dentro de un tenant de prue
 
   const db = env.authenticatedContext('owner-a', { tenantId: TENANT }).firestore();
   const ref = doc(db, `tenants/${TENANT}/resources/res_space`);
-  await assertSucceeds(setDoc(ref, data));
+  await assertSucceeds(setDoc(ref, Object.assign({}, data, { updatedBy: 'owner-a', updatedAt: serverTimestamp() })));
   const snap = await getDoc(ref);
   if (snap.data().kind !== 'space') throw new Error('el resource leído no coincide con lo escrito');
 });

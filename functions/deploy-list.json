@@ -13,6 +13,7 @@
     "resolveTenant",
     "setPlatformRole",
     "setUserRole",
-    "onTenantWritten"
+    "onTenantWritten",
+    "onTenantSubcollectionWritten"
   ]
 }

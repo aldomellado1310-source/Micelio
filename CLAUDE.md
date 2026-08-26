@@ -328,6 +328,49 @@ Estado conocido, a verificar antes de tocar nada:
   goal 17) -- el paso (b) tal como está escrito en el pool asume que ya
   existe, mismo tipo de brecha que ya se resolvió para `setBookingStatus`
   en el goal 13.
+  Goal 15: `tenants/{tenantId}/auditLog/{id}` es una traza de auditoría real
+  por tenant (actorUid, actorRole, action, collection, docId, before,
+  after, source, ts), escrita SOLO por el trigger
+  `functions/index.js#onTenantSubcollectionWritten` (Admin SDK) -- nunca
+  por el panel, para que no dependa de que el front "se acuerde" de
+  loguear (mismo bug ya conocido de `adminLog`, marcado obsoleto en
+  `firestore.rules` sin borrarlo). El trigger escucha
+  `tenants/{tenantId}/{collection}/{docId}` (wildcard sobre TODAS las
+  subcolecciones) y se excluye a sí mismo explícitamente cuando
+  `collection == 'auditLog'` -- si no, escribir una fila dispararía el
+  mismo trigger de nuevo, en loop infinito. `actorRole` se resuelve con un
+  `getUser()` a Auth (Admin SDK) en vez de confiar en un campo que el
+  cliente pudiera estampar él mismo -- un cliente puede mentir sobre su
+  propio role, no puede mentirle a Auth sobre sus custom claims reales.
+  Los borrados NO generan fila (límite conocido, documentado en
+  `functions/auditLog.js`): `stamped()` solo exige `updatedBy`/`updatedAt`
+  en create/update, un delete no trae `request.resource.data` que estampar,
+  así que no hay forma confiable de atribuirlo a un actor real.
+
+  CLAVE del goal, YA IMPLEMENTADA desde el goal 8 pero ahora EXTENDIDA:
+  `stamped()` (la misma función de `firestore.rules`, no una copia nueva)
+  pasa a exigirse también en `create`/`update` de
+  `tenants/{tenantId}/{collection}/{docId}` (antes solo se exigía en
+  `tenants/{tenantId}` mismo) -- sin esto, cualquiera podría escribir
+  `updatedBy` con el uid de otra persona y la bitácora mentiría sobre quién
+  hizo qué. Esto rompió la forma de varios tests de goals anteriores
+  (goal 6, 8, 9, 14) que escribían dentro de un tenant sin
+  `updatedBy`/`updatedAt` -- se corrigieron agregando esos campos a cada
+  `setDoc`/`updateDoc` afectado, documentado en cada archivo.
+  `auditLog` se sacó de la lista genérica de `inTenantCollections()`: tiene
+  su propia regla (lectura solo `owner`+superadmin, escritura siempre
+  `false`) en un `match` aparte -- dejarla también en la regla genérica
+  (más permisiva) la habría ganado por OR, mismo problema ya documentado
+  para el goal 15 en el propio archivo de reglas.
+  `tests/rules/audit-log.rules.test.js` prueba lectura por role
+  (owner/superadmin sí, reception/staff no), aislamiento tenant-vs-tenant,
+  que ni el owner puede escribir auditLog directo, y el requisito CLAVE:
+  un write a `services` sin `updatedBy`/`updatedAt` correctos (ausente,
+  mentiroso, o con un timestamp de cliente en vez de `serverTimestamp()`)
+  se rechaza. Sin callable de escritura de `services`/`resources` para
+  negocio todavía -- el trigger reacciona a cualquier write que YA pase
+  las reglas (hoy, solo vía el emulador en tests), no a uno real desde un
+  panel (eso sigue pendiente de goals de wiring posteriores).
 - Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
   desplegar (ya no ocho nombres a mano en README.md).
   `functions/scripts/printDeployTargets.js` arma el `--only` de

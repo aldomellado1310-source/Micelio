@@ -97,7 +97,14 @@ service cloud.firestore {
     // getAvailability, mismo patrón de privacidad que bookings.
     match /scheduleBlocks/{id} { allow read, write: if isAdmin(); }
 
-    // Log de actividad: solo admin
+    // Log de actividad: solo admin. OBSOLETA desde el goal 15 (Etapa A) --
+    // log() escribe en memoria y saveAdmin() nunca la persiste (ver
+    // CLAUDE.md, "Estado conocido"), así que en la práctica esta colección
+    // nunca se escribe. tenants/{tenantId}/auditLog (más abajo) la
+    // reemplaza para el modelo tenant-aware: escrita por trigger, no por el
+    // panel, así que no depende de que el front "se acuerde" de loguear. Se
+    // deja la regla tal cual -- no se borra, por si algún día se decide
+    // migrar su historial.
     match /adminLog/{id} { allow read, write: if isAdmin(); }
 
     // ══ ROLES DE PLATAFORMA (Etapa T, goal 7 del pool ReservaGo) ══
@@ -171,7 +178,7 @@ service cloud.firestore {
     match /tenantsByDomain/{dominio} { allow read: if true; allow write: if false; }
 
     // ══ SUBCOLECCIONES POR TENANT (Etapa T, goal 6) ══
-    // resources, services, bookings, holds, auditLog, dataRequests: el
+    // resources, services, bookings, holds, dataRequests: el
     // aislamiento entre tenants lo garantiza la RUTA del documento (esta
     // regla), no la disciplina de quien escribe cada query -- exactamente el
     // problema que hoy sufre isAdmin() con el UID a mano (un campo tenantId
@@ -212,8 +219,13 @@ service cloud.firestore {
       return exists(tenantPath) && get(tenantPath).data.status == 'suspended';
     }
     match /tenants/{tenantId}/{collection}/{docId} {
+      // auditLog NO está en esta lista a propósito (goal 15, más abajo):
+      // tiene su propia regla, más estricta (lectura solo owner/superadmin,
+      // escritura nunca desde el cliente) -- dejarla acá también habría
+      // hecho que la regla genérica (más permisiva) ganara por OR, como
+      // pasa con cualquier `match` que se solapa en Firestore.
       function inTenantCollections() {
-        return collection in ['resources', 'services', 'bookings', 'holds', 'auditLog', 'dataRequests']
+        return collection in ['resources', 'services', 'bookings', 'holds', 'dataRequests']
           && request.auth != null && request.auth.token.tenantId == tenantId;
       }
 
@@ -222,9 +234,10 @@ service cloud.firestore {
       // tenantId ya podía desde el goal 6 -- el goal 14 solo agrega una
       // restricción ADICIONAL para 'staff': acotado a los bookings donde
       // SU PROPIO resourceId aparece en resourceIds[] (goal 9/10/11).
-      // Ninguna otra colección (resources/services/holds/auditLog/
-      // dataRequests) se restringe por role -- el goal solo pide acotar
-      // bookings. .get('resourceIds', []) es seguro ante un doc que no
+      // Ninguna otra colección (resources/services/holds/dataRequests) se
+      // restringe por role -- el goal solo pide acotar bookings (auditLog
+      // ya tiene su propia regla, ver goal 15 más abajo). .get('resourceIds', [])
+      // es seguro ante un doc que no
       // trajera ese campo (mismo patrón que isValidEmail() más arriba en
       // este archivo, con request.resource.data.get(...)).
       //
@@ -259,9 +272,38 @@ service cloud.firestore {
       // isTenantSuspended() usa exists() antes de get().data.
       allow get: if inTenantCollections() && (resource == null || bookingAccessOk(resource.data));
       allow list: if inTenantCollections();
-      allow create: if inTenantCollections() && !isTenantSuspended(tenantId) && bookingAccessOk(request.resource.data);
-      allow update, delete: if inTenantCollections() && !isTenantSuspended(tenantId)
+      // stamped() (goal 15, ver más arriba) en create/update -- el trigger
+      // de auditLog (functions/index.js#onTenantSubcollectionWritten) lee
+      // `updatedBy` del documento para atribuir cada fila a su autor real;
+      // sin esto cualquiera podría mentir sobre quién hizo un cambio, igual
+      // que ya se exige para tenants/{tenantId} desde el goal 8. No aplica
+      // a `delete` -- no hay request.resource.data que estampar en un
+      // borrado (bookings ya no borra nunca desde el goal 13; el resto de
+      // colecciones si acaso deja de existir, no queda un before/after que
+      // atribuir del mismo modo).
+      allow create: if inTenantCollections() && !isTenantSuspended(tenantId) && stamped() && bookingAccessOk(request.resource.data);
+      allow update: if inTenantCollections() && !isTenantSuspended(tenantId) && stamped()
         && (resource == null || bookingAccessOk(resource.data));
+      allow delete: if inTenantCollections() && !isTenantSuspended(tenantId)
+        && (resource == null || bookingAccessOk(resource.data));
+    }
+
+    // ══ BITÁCORA DE NEGOCIO (Etapa A, goal 15 del pool ReservaGo) ══
+    // tenants/{tenantId}/auditLog/{id}: actorUid, actorRole, action,
+    // collection, docId, before, after, source, ts (serverTimestamp).
+    // Escrita SOLO por el trigger onTenantSubcollectionWritten (Admin SDK,
+    // no sujeto a estas reglas) -- igual que platformAuditLog (goal 8), la
+    // bitácora no depende de que el panel "se acuerde" de loguear (ver el
+    // bug ya conocido de adminLog en CLAUDE.md, ahora obsoleto). Lectura
+    // solo el owner de ESE tenant o un superadmin -- reception/staff no ven
+    // la bitácora de auditoría del negocio.
+    function isTenantOwner(tenantId) {
+      return request.auth != null && request.auth.token.get('role', '') == 'owner'
+        && request.auth.token.tenantId == tenantId;
+    }
+    match /tenants/{tenantId}/auditLog/{id} {
+      allow read: if isTenantOwner(tenantId) || isSuperadmin();
+      allow write: if false;
     }
   }
 }

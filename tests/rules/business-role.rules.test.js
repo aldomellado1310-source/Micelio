@@ -8,7 +8,7 @@
 // funcionando con roles de negocio encima.
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { beforeAll, afterAll, test } from 'vitest';
 
 let env;
@@ -81,8 +81,11 @@ test('staff NO puede crear un booking asignado a OTRO resourceId', async () => {
 
 test('staff SÍ puede crear un booking asignado a SU PROPIO resourceId', async () => {
   const db = dbFor('staff-ana', { role: 'staff', tenantId: TENANT, resourceId: 'res_ana' });
+  // updatedBy/updatedAt: firestore.rules#stamped() los exige desde el goal
+  // 15 en todo create/update dentro de un tenant.
   await assertSucceeds(setDoc(doc(db, `tenants/${TENANT}/bookings/bk_new_ok`), {
     status: 'pending', resourceIds: ['res_ana'], time: '11:00', dur: 30,
+    updatedBy: 'staff-ana', updatedAt: serverTimestamp(),
   }));
 });
 
