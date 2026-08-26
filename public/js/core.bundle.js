@@ -383,6 +383,21 @@ var SWCore = (() => {
     }
   });
 
+  // functions/shared/role.js
+  var require_role = __commonJS({
+    "functions/shared/role.js"(exports, module) {
+      "use strict";
+      var BUSINESS_ROLES = ["owner", "reception", "staff"];
+      function isValidBusinessRole(role) {
+        return BUSINESS_ROLES.indexOf(role) !== -1;
+      }
+      function requiresResourceId(role) {
+        return role === "staff";
+      }
+      module.exports = { BUSINESS_ROLES, isValidBusinessRole, requiresResourceId };
+    }
+  });
+
   // functions/shared/index.js
   var require_index = __commonJS({
     "functions/shared/index.js"(exports, module) {
@@ -394,7 +409,8 @@ var SWCore = (() => {
         require_status(),
         require_resource(),
         require_service(),
-        require_booking()
+        require_booking(),
+        require_role()
       );
     }
   });

@@ -17,7 +17,9 @@ const { resolveBusinessTz, resolveBufferMin } = require('./shared/timezone.js');
 const { searchPlaceId, fetchPlaceDetails, isFresh } = require('./googleReviews.js');
 const { resolveTenantId, assertTenantIdMatches } = require('./tenant.js');
 const { setPlatformRole } = require('./platformRole.js');
+const { setUserRole } = require('./setUserRole.js');
 const { buildPlatformAuditEntry } = require('./platformAuditLog.js');
+const { buildAuditEntry } = require('./auditLog.js');
 
 const app = initializeApp();
 const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
@@ -519,6 +521,25 @@ exports.setPlatformRole = onCall(
   async (request) => setPlatformRole(request, getAuth(app))
 );
 
+// setUserRole (Etapa A, goal 14 del pool ReservaGo): única forma de otorgar
+// role+tenantId(+resourceId) de negocio vía código -- solo invocable por un
+// 'owner' de ese mismo tenant o por un superadmin (ver
+// functions/setUserRole.js#assertCanSetUserRole).
+//
+// SECUENCIA OBLIGATORIA del goal antes de poder retirar el UID hardcodeado
+// de firestore.rules/storage.rules/functions/index.js (isAdmin(),
+// ADMIN_UID_FALLBACK): (a) desplegar y probar esto en staging, (b) asignar
+// role:'owner'+tenantId de Scissor White al UID actual, (c) VERIFICAR
+// cerrando y abriendo sesión que el token nuevo funciona, (d) recién
+// entonces retirar el UID. Ninguno de esos cuatro pasos se hizo en este
+// commit -- este entorno no puede desplegar a staging ni completar una
+// sesión de login real (ver CLAUDE.md, goal 14). El UID hardcodeado SIGUE
+// en los cuatro archivos hasta que Aldo complete (a)-(c) manualmente.
+exports.setUserRole = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => setUserRole(request, getAuth(app))
+);
+
 // onTenantWritten (Etapa T, goal 8 del pool ReservaGo): mantiene
 // platformAuditLog/{id} -- altas, suspensiones y reactivaciones de tenants.
 // Firestore no le entrega al trigger la identidad de quien escribió; lee
@@ -537,6 +558,54 @@ exports.onTenantWritten = onDocumentWritten(
       ...entry,
       tenantId: event.params.tenantId,
       ts: FieldValue.serverTimestamp(),
+    });
+  }
+);
+
+// onTenantSubcollectionWritten (Etapa A, goal 15 del pool ReservaGo):
+// mantiene tenants/{tenantId}/auditLog/{id} -- una traza de auditoría real
+// por tenant, escrita por trigger y NO por el panel (así no depende de que
+// el front "se acuerde" de loguear, ver adminLog en CLAUDE.md). Mismo
+// patrón que onTenantWritten (goal 8): lee `updatedBy` del documento, que
+// firestore.rules#stamped() exige en cada create/update dentro de un
+// tenant desde este goal.
+//
+// El wildcard `{collection}` cubre TODAS las subcolecciones de un tenant --
+// incluida auditLog misma, así que el primer chequeo del handler la excluye
+// explícitamente: sin eso, escribir una fila de auditoría dispararía este
+// mismo trigger de nuevo, en loop infinito.
+//
+// actorRole se resuelve con un getUser() a Auth (Admin SDK) en vez de
+// pedirle al cliente que lo estampe junto a updatedBy -- un cliente podría
+// mentir sobre su propio role, pero no puede mentirle a Auth sobre sus
+// custom claims reales. Si el lookup falla (uid inexistente, etc.) la fila
+// igual se escribe, con actorRole:null -- una fila de auditoría incompleta
+// es preferible a ninguna.
+//
+// Los borrados NO generan fila (ver buildAuditEntry) -- límite conocido,
+// documentado ahí, no cubierto por el hecho-cuando de este goal.
+exports.onTenantSubcollectionWritten = onDocumentWritten(
+  { document: 'tenants/{tenantId}/{collection}/{docId}', region: 'southamerica-east1' },
+  async (event) => {
+    const { tenantId, collection, docId } = event.params;
+    if (collection === 'auditLog') return;
+    const before = event.data.before.exists ? event.data.before.data() : null;
+    const after = event.data.after.exists ? event.data.after.data() : null;
+    const entry = buildAuditEntry({ before, after, collection, docId });
+    if (!entry) return;
+
+    let actorRole = null;
+    if (entry.actorUid) {
+      try {
+        const user = await getAuth(app).getUser(entry.actorUid);
+        actorRole = (user.customClaims && user.customClaims.role) || null;
+      } catch (err) {
+        logger.warn(`onTenantSubcollectionWritten: no se pudo resolver el role de ${entry.actorUid}`, err);
+      }
+    }
+
+    await getFirestore(app).collection(`tenants/${tenantId}/auditLog`).add({
+      ...entry, actorRole, ts: FieldValue.serverTimestamp(),
     });
   }
 );

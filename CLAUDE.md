@@ -280,6 +280,97 @@ Estado conocido, a verificar antes de tocar nada:
   `SWCore.occupiesSlot(b.status)` -- sin esto, una cita cancelada seguiría
   bloqueando su horario en el propio chequeo de conflictos del panel,
   aunque el servidor ya la considerara libre.
+  Goal 14: `functions/shared/role.js` define los roles de NEGOCIO
+  (owner/reception/staff), nivel separado de `platformRole:'superadmin'`
+  (goal 7) -- nunca se mezclan. `functions/setUserRole.js#setUserRole`
+  escribe `role`+`tenantId`(+`resourceId` si `role:'staff'`) en los custom
+  claims, mismo patrón que `setPlatformRole` (merge, nunca overwrite):
+  solo invocable por un `owner` del MISMO tenant o por un superadmin -- la
+  autorización se revisa ANTES de validar el resto del payload, para no
+  filtrarle forma del payload a quien no puede invocarlo.
+  `firestore.rules`: `tenants/{tenantId}/bookings` gana `staffOwnsBooking()`
+  -- un `staff` solo puede leer/crear/actualizar un booking si SU
+  `resourceId` aparece en `resourceIds[]` del documento; `owner`/`reception`
+  no tienen esa restricción (ven todo su tenant, igual que cualquier claim
+  con tenantId ya podía desde el goal 6). Ninguna otra colección
+  (resources/services/holds/auditLog/dataRequests) se restringe por role --
+  el goal solo pide acotar bookings. LIMITACIÓN CONOCIDA, documentada en la
+  regla: Firestore no permite filtrar documentos individuales dentro de un
+  `list` (query) vía reglas, solo permitir/denegar la query completa -- que
+  un `staff` solo VEA sus propios bookings en una lista depende de que el
+  cliente arme la query con `where('resourceIds','array-contains',
+  resourceId)`, por convención, no por regla; `list` sigue acotado
+  únicamente por tenantId. `request.auth.token.get('role','')` (nunca
+  `request.auth.token.role` a secas) -- la mayoría de los claims sintéticos
+  de tests previos a este goal no traen `role` en absoluto, y acceder a una
+  key ausente de un token revienta la evaluación (4 tests de suites
+  anteriores lo confirmaron reventando ANTES de agregar el `.get()` seguro;
+  quedaron verdes después). `tests/rules/business-role.rules.test.js`
+  prueba el hecho-cuando central del goal (`staff` de OTRO recurso
+  denegado), multi-recurso, `owner`/`reception` sin restricción, escritura
+  (`create`/`update`), lectura de un booking inexistente sin reventar la
+  regla, y que el aislamiento tenant-vs-tenant del goal 6 sigue intacto con
+  roles encima.
+
+  SECUENCIA OBLIGATORIA del goal (retirar el UID hardcodeado de
+  `firestore.rules`/`storage.rules`×2/`functions/index.js`): (a) desplegar
+  y probar `setUserRole` en staging, (b) asignar `role:'owner'`+el tenantId
+  de Scissor White al UID actual, (c) VERIFICAR cerrando y abriendo sesión
+  que el token nuevo funciona, (d) recién entonces retirar el UID. NINGUNO
+  de esos cuatro pasos se ejecutó en este commit -- este entorno no puede
+  desplegar a staging (los despliegues los hace Aldo) ni completar una
+  sesión de login real (mismo bloqueo de `www.gstatic.com` que goals
+  2/3/8/12/13). El propio goal lo anticipa explícitamente ("si no puedes
+  completar (c), DETENTE y avísame. No sigas al paso (d)"), así que el UID
+  SIGUE en los cuatro archivos, sin tocar -- Scissor White sigue operando
+  exactamente igual que antes de este goal. Tampoco hay tenant real de
+  Scissor White todavía para asignarle el `role:'owner'` al UID (eso es el
+  goal 17) -- el paso (b) tal como está escrito en el pool asume que ya
+  existe, mismo tipo de brecha que ya se resolvió para `setBookingStatus`
+  en el goal 13.
+  Goal 15: `tenants/{tenantId}/auditLog/{id}` es una traza de auditoría real
+  por tenant (actorUid, actorRole, action, collection, docId, before,
+  after, source, ts), escrita SOLO por el trigger
+  `functions/index.js#onTenantSubcollectionWritten` (Admin SDK) -- nunca
+  por el panel, para que no dependa de que el front "se acuerde" de
+  loguear (mismo bug ya conocido de `adminLog`, marcado obsoleto en
+  `firestore.rules` sin borrarlo). El trigger escucha
+  `tenants/{tenantId}/{collection}/{docId}` (wildcard sobre TODAS las
+  subcolecciones) y se excluye a sí mismo explícitamente cuando
+  `collection == 'auditLog'` -- si no, escribir una fila dispararía el
+  mismo trigger de nuevo, en loop infinito. `actorRole` se resuelve con un
+  `getUser()` a Auth (Admin SDK) en vez de confiar en un campo que el
+  cliente pudiera estampar él mismo -- un cliente puede mentir sobre su
+  propio role, no puede mentirle a Auth sobre sus custom claims reales.
+  Los borrados NO generan fila (límite conocido, documentado en
+  `functions/auditLog.js`): `stamped()` solo exige `updatedBy`/`updatedAt`
+  en create/update, un delete no trae `request.resource.data` que estampar,
+  así que no hay forma confiable de atribuirlo a un actor real.
+
+  CLAVE del goal, YA IMPLEMENTADA desde el goal 8 pero ahora EXTENDIDA:
+  `stamped()` (la misma función de `firestore.rules`, no una copia nueva)
+  pasa a exigirse también en `create`/`update` de
+  `tenants/{tenantId}/{collection}/{docId}` (antes solo se exigía en
+  `tenants/{tenantId}` mismo) -- sin esto, cualquiera podría escribir
+  `updatedBy` con el uid de otra persona y la bitácora mentiría sobre quién
+  hizo qué. Esto rompió la forma de varios tests de goals anteriores
+  (goal 6, 8, 9, 14) que escribían dentro de un tenant sin
+  `updatedBy`/`updatedAt` -- se corrigieron agregando esos campos a cada
+  `setDoc`/`updateDoc` afectado, documentado en cada archivo.
+  `auditLog` se sacó de la lista genérica de `inTenantCollections()`: tiene
+  su propia regla (lectura solo `owner`+superadmin, escritura siempre
+  `false`) en un `match` aparte -- dejarla también en la regla genérica
+  (más permisiva) la habría ganado por OR, mismo problema ya documentado
+  para el goal 15 en el propio archivo de reglas.
+  `tests/rules/audit-log.rules.test.js` prueba lectura por role
+  (owner/superadmin sí, reception/staff no), aislamiento tenant-vs-tenant,
+  que ni el owner puede escribir auditLog directo, y el requisito CLAVE:
+  un write a `services` sin `updatedBy`/`updatedAt` correctos (ausente,
+  mentiroso, o con un timestamp de cliente en vez de `serverTimestamp()`)
+  se rechaza. Sin callable de escritura de `services`/`resources` para
+  negocio todavía -- el trigger reacciona a cualquier write que YA pase
+  las reglas (hoy, solo vía el emulador en tests), no a uno real desde un
+  panel (eso sigue pendiente de goals de wiring posteriores).
 - Despliegue: `functions/deploy-list.json` es la lista versionada de funciones a
   desplegar (ya no ocho nombres a mano en README.md).
   `functions/scripts/printDeployTargets.js` arma el `--only` de

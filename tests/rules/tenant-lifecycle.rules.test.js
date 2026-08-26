@@ -80,7 +80,9 @@ test('un usuario del tenant A puede ESCRIBIR mientras el tenant está activo', a
     await setDoc(doc(ctx.firestore(), 'tenants/ten_active_write'), { name: 'x', status: 'active', updatedBy: 'super-uid', updatedAt: serverTimestamp() });
   });
   const db = env.authenticatedContext('owner-active-write', { tenantId: 'ten_active_write' }).firestore();
-  await assertSucceeds(setDoc(doc(db, 'tenants/ten_active_write/bookings/b1'), { x: 1 }));
+  // updatedBy/updatedAt: stamped() (goal 15) los exige en todo create/update
+  // dentro de un tenant.
+  await assertSucceeds(setDoc(doc(db, 'tenants/ten_active_write/bookings/b1'), { x: 1, updatedBy: 'owner-active-write', updatedAt: serverTimestamp() }));
 });
 
 // CRÍTICO -- el hecho-cuando central del goal 8.
@@ -112,5 +114,5 @@ test('reactivar el tenant (status vuelve a active) restaura la escritura', async
     await setDoc(doc(ctx.firestore(), 'tenants/ten_reactivated'), { name: 'x', status: 'active', updatedBy: 'super-uid', updatedAt: serverTimestamp() });
   });
   const db = env.authenticatedContext('owner-reactivated', { tenantId: 'ten_reactivated' }).firestore();
-  await assertSucceeds(setDoc(doc(db, 'tenants/ten_reactivated/bookings/b1'), { x: 1 }));
+  await assertSucceeds(setDoc(doc(db, 'tenants/ten_reactivated/bookings/b1'), { x: 1, updatedBy: 'owner-reactivated', updatedAt: serverTimestamp() }));
 });
