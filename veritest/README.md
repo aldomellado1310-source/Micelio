@@ -91,26 +91,54 @@ plantilla (como `generar.js` de las Jornadas SAMU28). Regla para una plantilla p
    hosting. Para pruebas usa una base de prueba: `--base-url http://localhost:5003`.
 2. **El proyecto Firebase.** Todavía no existe. Reemplazar los placeholders de
    `.firebaserc` y `public/js/firebase-init-veritest.js`.
-3. **Probar contra Firebase de verdad.** La verificación en navegador se hizo con el
-   SDK de Firebase reemplazado por un stub (ver más abajo). Autenticación real,
-   claims reales y despliegue siguen pendientes.
+3. **Probar contra Firebase en la nube.** El backend se probó contra los emuladores reales
+   (ver "Pruebas"), pero la verificación en navegador usa el SDK de Firebase reemplazado
+   por un stub, y el despliegue, IAM, el plan Blaze y el dominio siguen sin probarse.
 
-## Puesta en marcha (la hace Aldo; nada se despliega desde aquí)
+## Puesta en marcha (la hace Aldo; nada se despliega desde el repo ni desde el CI)
+
+Orden pensado para no dejar un QR impreso apuntando a un dominio que no existe:
+
+1. **Proyecto Firebase de Veritest** (consola de Firebase; NO `scissor-white` ni
+   `registrago001`). Plan **Blaze** (Cloud Functions lo exige). Crear Firestore en
+   `southamerica-east1` y habilitar Authentication → correo/contraseña. Registrar una
+   app web y copiar su `firebaseConfig` a `public/js/firebase-init-veritest.js`;
+   poner el id del proyecto en `.firebaserc`.
+2. **Variable**: `functions/.env` (no se versiona): `VERITEST_BASE_URL=https://veritest.cl`.
+3. **Desplegar**:
+   ```bash
+   cd veritest/functions && npm ci && cd ..
+   firebase deploy --only functions,hosting,firestore --project <proyecto-veritest>
+   ```
+4. **Dominio `veritest.cl`**: Hosting → "Agregar dominio personalizado", y crear en NIC Chile
+   los registros DNS que indique la consola. Esperar a que el certificado quede activo.
+   **Hasta que `https://veritest.cl/v/<cualquier-id>` cargue, no emitir diplomas reales.**
+5. **Habilitar emisores** (crea `issuers/<id>` y le pone el claim a la cuenta, con merge):
+   ```bash
+   cd functions
+   node scripts/setIssuer.js --project <proyecto-veritest> \
+        --email persona@dominio.cl --issuer samu-talcahuano --name "SAMU SS Talcahuano"
+   ```
+6. **Cargar el registro local** que produjo el CLI, si lo hubo (idempotente):
+   `node scripts/importRegistry.js --project <proyecto-veritest> --registry ../veritest-registry.jsonl --dry-run`
+   (y luego sin `--dry-run`).
+
+### Dar de baja `atestia.web.app`
+
+`atestia.web.app` es el dominio por defecto de un sitio de Firebase Hosting llamado
+`atestia`; nada de este repo lo crea ni lo referencia. Para bajarlo hay que saber **en qué
+proyecto está**:
 
 ```bash
-cd veritest
-# 0) crear el proyecto Firebase de Veritest; poner su id en .firebaserc
-# 1) habilitar a un emisor (crea issuers/<id> y le pone el claim a la cuenta)
-cd functions && npm ci
-node scripts/setIssuer.js --project <proyecto-veritest> \
-     --email persona@dominio.cl --issuer samu-talcahuano --name "SAMU SS Talcahuano"
-# 2) cargar el registro que produjo el CLI (opcional, idempotente)
-node scripts/importRegistry.js --project <proyecto-veritest> --registry ../veritest-registry.jsonl --dry-run
-# 3) desplegar
-cd .. && firebase deploy --only functions,hosting,firestore --project <proyecto-veritest>
+firebase hosting:sites:list --project <proyecto>        # ¿aparece el sitio "atestia"?
+firebase hosting:disable --site atestia --project <proyecto>
 ```
 
-`functions/.env` (no se versiona): `VERITEST_BASE_URL=https://veritest.cl`.
+- `hosting:disable` **es reversible**: deja de servir el sitio (responde "Site Not Found") y se
+  vuelve a publicar con un `firebase deploy`. Conviene empezar por ahí.
+- `firebase hosting:sites:delete atestia --project <proyecto>` es **permanente**, y falla si
+  `atestia` es el sitio *por defecto* del proyecto (el que se llama igual que el proyecto).
+- Antes de bajarlo, comprobar que ningún enlace ni QR impreso apunte a ese dominio.
 
 Límites de abuso: `verify` es público y sin autenticación; la protección es que los
 ids y las huellas no se pueden adivinar (128 / 256 bits) y `maxInstances`. No hay
@@ -121,7 +149,22 @@ rate limiting propio todavía.
 ```bash
 cd functions && npm test        # 54 tests, node --test: núcleo, sellado, registro, almacenes, CLI, scripts
 node tests/e2e.cjs              # navegador real (Playwright): panel, ficha, subida de archivos, caminos negativos
+
+# Emuladores reales de Firebase (Auth + Firestore + Functions + Hosting); necesita firebase-tools y JDK 21+
+firebase emulators:exec --only auth,firestore,functions,hosting --project demo-veritest "node tests/emulator.cjs"
 ```
+
+`tests/emulator.cjs` (15 pasos) corre el `index.js` de verdad con tokens de Auth con claims
+de verdad, las transacciones de Firestore de verdad, `firestore.rules` de verdad y los
+rewrites de `firebase.json`: emisor habilitado / sin sesión / sin claim / superadmin de otro
+producto / emisor suspendido, suplantación de emisor ignorada, duplicados, **4 registros
+simultáneos del mismo PDF dejan uno**, una carrera directa al almacén contra la transacción,
+`/api/verify` y `/v/<id>` por Hosting, y que ningún cliente pueda leer ni escribir Firestore.
+Se validó con bugs deliberados (reglas abiertas; transacción que no rechaza huellas repetidas).
+
+> Detrás de un proxy HTTP(S) con `HTTPS_PROXY` definido, el emulador de Hosting puede mandar
+> su reenvío local por el proxy y devolver `403`. Es del entorno, no de Veritest: correr con
+> `env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy firebase emulators:exec …`.
 
 - `npm test` incluye una prueba que **renderiza el PDF sellado con `pdftoppm` y
   decodifica el QR con jsQR** en las cuatro esquinas sobre fondo oscuro (se omite

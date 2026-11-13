@@ -316,10 +316,18 @@ Estado conocido, a verificar antes de tocar nada:
   de superadmin (goal 8). Verificado: 54 tests (`veritest/functions`, `npm test`,
   incluye renderizar el PDF sellado y decodificar el QR con jsQR), 16 pasos en
   Chromium real (`veritest/tests/e2e.cjs`, con el SDK de Firebase reemplazado
-  por un stub) y el CLI sobre los 55 certificados reales de las Jornadas SAMU28.
-  SIGUE PENDIENTE una prueba contra Firebase de verdad (Auth con claims, callable
-  desplegado). Los diplomas, el Excel y el registro local (`veritest-registry*.jsonl`)
-  llevan nombres de personas: NO se versionan (.gitignore).
+  por un stub), 15 pasos contra los EMULADORES REALES de Auth+Firestore+Functions+
+  Hosting (`veritest/tests/emulator.cjs`: claims de verdad, transacciones, reglas y
+  rewrites de `firebase.json`; detrás del proxy de este entorno hay que correrlo con
+  `env -u HTTPS_PROXY`, ver README) y el CLI sobre los 55 certificados reales de las
+  Jornadas SAMU28. SIGUE PENDIENTE Firebase en la nube (despliegue, IAM, plan Blaze,
+  dominio) -- el emulador no lo cubre. Estado del despliegue (2026-11-13): NO está
+  levantado; la sesión de Claude no tiene credenciales de Google válidas
+  (`CLOUDSDK_AUTH_ACCESS_TOKEN` es un valor de relleno), ni hay proyecto Firebase de
+  Veritest, ni se sabe en qué proyecto vive `atestia.web.app` (nada del repo lo crea ni
+  lo referencia). El procedimiento exacto, incluido cómo dar de baja ese sitio, está en
+  `veritest/README.md#Puesta-en-marcha`. Los diplomas, el Excel y el registro local
+  (`veritest-registry*.jsonl`) llevan nombres de personas: NO se versionan (.gitignore).
 
 INVARIANTES — ningún goal puede romperlos:
 - La zona horaria del negocio gobierna, nunca la del navegador (IANA, zonedInstant()).
