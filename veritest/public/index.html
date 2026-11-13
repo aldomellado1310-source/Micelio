@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<title>Veritest · Verifica diplomas</title>
+<meta name="description" content="Comprueba si un diploma o certificado fue registrado por su emisor: escanea su QR o sube el PDF.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/veritest.css">
+</head>
+<body data-page="home">
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="/">Veri<span>test</span></a>
+    <span class="tag">Verificación de diplomas</span>
+  </header>
+
+  <main>
+    <h1>¿Este diploma está registrado?</h1>
+    <p class="lead">Escanea el código QR del diploma con la cámara de tu teléfono, o sube aquí el archivo PDF para comprobar que es idéntico al que registró su emisor.</p>
+
+    <section class="card" aria-labelledby="h-file">
+      <h2 id="h-file">Verificar un archivo PDF</h2>
+      <label class="drop" id="drop" for="file">
+        <input id="file" type="file" accept="application/pdf,.pdf">
+        <strong>Elegir un PDF</strong> o soltarlo aquí<br>
+        <span class="small">El archivo no se sube: tu navegador calcula su huella y solo esa huella se consulta.</span>
+      </label>
+      <div id="file-status" role="status" aria-live="polite" class="small"></div>
+      <div id="result" aria-live="polite"></div>
+    </section>
+
+    <section class="card" aria-labelledby="h-how">
+      <h2 id="h-how">Qué puede (y qué no puede) confirmar Veritest</h2>
+      <ul class="plain">
+        <li>Veritest reconoce los diplomas que su emisor <strong>registró</strong>. Un diploma que nadie registró no aparece, sea verdadero o falso.</li>
+        <li>El QR lleva a la ficha del registro: compara el nombre, el diploma y el emisor con tu documento.</li>
+        <li>Subir el PDF comprueba que el archivo es <strong>exactamente</strong> el registrado. Si fue modificado, reimpreso o convertido, no coincidirá aunque el diploma sea real.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>Veritest</footer>
+</div>
+<script src="/js/verify.js"></script>
+</body>
+</html>

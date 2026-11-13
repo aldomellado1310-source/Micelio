@@ -43,3 +43,10 @@ graphify-out/
 
 # Capturas de los scripts de verificación en navegador (tests/browser/)
 .tmp-screenshots/
+
+# Veritest: el registro local de diplomas lleva nombres de personas, y los PDF
+# de entrada/salida de un lote son diplomas reales. Nunca versionar.
+veritest-registry*.jsonl
+veritest/**/*.jsonl
+veritest/out/
+veritest/functions/node_modules/
