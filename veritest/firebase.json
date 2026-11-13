@@ -1,0 +1,38 @@
+{
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "Referrer-Policy", "value": "no-referrer" },
+          { "key": "X-Frame-Options", "value": "DENY" }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "/api/verify",
+        "function": { "functionId": "verify", "region": "southamerica-east1" }
+      },
+      { "source": "/v/**", "destination": "/v/index.html" }
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "functions": [
+    { "source": "functions", "codebase": "default", "runtime": "nodejs22" }
+  ],
+  "emulators": {
+    "auth": { "port": 9098 },
+    "firestore": { "port": 8081 },
+    "functions": { "port": 5002 },
+    "hosting": { "port": 5003 },
+    "ui": { "enabled": true, "port": 4001 },
+    "singleProjectMode": true
+  }
+}

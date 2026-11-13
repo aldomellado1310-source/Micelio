@@ -8,6 +8,9 @@ name: CI
 #   2) node --test de functions/ (incluye el cross-check de goal 3).
 #   3) tests de reglas (firestore.rules/storage.rules) contra el emulador de
 #      Firestore.
+#   4) job `veritest`: node --test de veritest/functions (producto aparte, ver
+#      veritest/README.md). Job separado a propósito: no necesita JDK ni el
+#      emulador, y un fallo ahí no debe ocultar uno del sistema de reservas.
 on:
   push:
     branches: [main]
@@ -48,3 +51,25 @@ jobs:
 
       - name: Tests de reglas (Firestore emulator)
         run: npm run test:rules
+
+  veritest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # pdftoppm (poppler) renderiza el PDF sellado para la prueba que decodifica
+      # su QR. La prueba se omite sola si falta; se instala para que corra de verdad.
+      - name: Instalar poppler-utils
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
+      - name: Instalar dependencias (veritest/functions)
+        run: npm ci
+        working-directory: veritest/functions
+
+      - name: node --test (veritest/functions)
+        run: npm test
+        working-directory: veritest/functions

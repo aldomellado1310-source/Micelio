@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Veritest: NINGÚN acceso de cliente, a nada.
+    //
+    // Todo pasa por Cloud Functions con Admin SDK (que no está sujeto a estas
+    // reglas): `verify` (público) devuelve solo la vista pública de un
+    // diploma, y `registerDiploma` exige un emisor autenticado. Nada se lee ni
+    // se escribe directo desde el navegador, así que no hay forma de listar
+    // diplomas, de leer huellas, ni de escribir un registro falso saltándose
+    // el callable.
+    //
+    //   diplomas/{id}      registro del diploma (nombre del titular, huellas)
+    //   hashes/{sha256}    índice huella -> id
+    //   issuers/{issuerId} emisores habilitados (los crea scripts/setIssuer.js)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

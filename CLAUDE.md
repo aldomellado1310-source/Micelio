@@ -294,6 +294,32 @@ Estado conocido, a verificar antes de tocar nada:
   tests/rules/storage.rules.test.js fallaba siempre por falta del emulador de
   Storage -- ahora `--only firestore,storage`. El deploy sigue siendo manual
   (Aldo lo corre); el CI no despliega nada, solo verifica.
+- Veritest (producto APARTE del sistema de reservas, 2026-11-13): verificación
+  de diplomas -- el emisor genera diplomas o entrega diplomas ya hechos, y
+  Veritest los registra, les pega un QR (`<base>/v/<id>`) y permite verificarlos
+  por QR o por huella SHA-256 del archivo. Vive en `veritest/`, AUTOCONTENIDO
+  (su propio `functions/`, `firebase.json`, `firestore.rules`, `public/`,
+  `.firebaserc`); decisión consultada y confirmada por Aldo: NO se mezcla con
+  `functions/`, `firestore.rules` ni `public/` de este sistema, y va en SU PROPIO
+  proyecto Firebase (no `scissor-white` ni `registrago001` -- los scripts de
+  `veritest/functions/scripts/` se niegan a correr contra esos dos). Ver
+  `veritest/README.md` (modelo de confianza, límites, puesta en marcha).
+  Puntos que no hay que perder de vista: (1) solo verifica lo que un emisor
+  autenticado registró -- un QR válido copiado sobre un diploma falso muestra los
+  datos del original, por eso existe la verificación por huella; (2) el id del QR
+  es aleatorio (128 bits), nunca el folio; (3) la verificación FALLA CERRADA (al
+  revés que el widget de reservas); (4) el QR codifica un dominio y un QR impreso
+  no se corrige -- `veritest.cl` debe ser de Aldo y estar sirviendo el hosting
+  ANTES de emitir diplomas reales (la base es configurable, `VERITEST_BASE_URL`);
+  (5) el proyecto Firebase de Veritest TODAVÍA NO EXISTE: `.firebaserc` y
+  `public/js/firebase-init-veritest.js` tienen placeholders, igual que el panel
+  de superadmin (goal 8). Verificado: 54 tests (`veritest/functions`, `npm test`,
+  incluye renderizar el PDF sellado y decodificar el QR con jsQR), 16 pasos en
+  Chromium real (`veritest/tests/e2e.cjs`, con el SDK de Firebase reemplazado
+  por un stub) y el CLI sobre los 55 certificados reales de las Jornadas SAMU28.
+  SIGUE PENDIENTE una prueba contra Firebase de verdad (Auth con claims, callable
+  desplegado). Los diplomas, el Excel y el registro local (`veritest-registry*.jsonl`)
+  llevan nombres de personas: NO se versionan (.gitignore).
 
 INVARIANTES — ningún goal puede romperlos:
 - La zona horaria del negocio gobierna, nunca la del navegador (IANA, zonedInstant()).
